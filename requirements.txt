@@ -1,0 +1,16 @@
+torch
+torchvision
+wandb
+hydra-core
+pyyaml
+omegaconf
+colorama
+tqdm
+opencv-python
+matplotlib
+lightning
+click
+moviepy
+imageio
+einops
+wandb-osh

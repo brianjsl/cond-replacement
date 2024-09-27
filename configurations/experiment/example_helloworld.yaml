@@ -1,0 +1,6 @@
+# inherites from base_experiment.yaml
+defaults:
+  - base_experiment
+
+tasks: [main]  # runs the main method of HelloWorldExperiment in `experiments/example_helloworld.py`
+message: "Hello World!"
