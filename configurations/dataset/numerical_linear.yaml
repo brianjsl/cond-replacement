@@ -1,0 +1,16 @@
+defaults:
+  - base_dataset
+
+n_points: 1000
+x_dist: beta
+noise_fn: beta
+random_seed: 42
+a: 1
+b: 0
+sigma: 0.2
+x_conc1: 8
+x_conc2: 2
+y_conc1: 6
+y_conc2: 9
+val_x_cond: 0.1
+test_x_cond: 0.1

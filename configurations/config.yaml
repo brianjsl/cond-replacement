@@ -1,15 +1,15 @@
 # configuration parsing starts here
 defaults:
-  - experiment: example_classification # experiment yaml file name in configurations/experiments folder [fixme]
-  - dataset: example_cifar10 # dataset yaml file name in configurations/dataset folder [fixme]
-  - algorithm: example_classifier # algorithm yaml file name in configurations/algorithm folder [fixme]
+  - experiment: exp_2d # experiment yaml file name in configurations/experiments folder [fixme]
+  - dataset: numerical_linear # dataset yaml file name in configurations/dataset folder [fixme]
+  - algorithm: diff_replacement # algorithm yaml file name in configurations/algorithm folder [fixme]
   - cluster: null # optional, cluster yaml file name in configurations/cluster folder. Leave null for local compute
 
 debug: false # global debug flag will be passed into configuration of experiment, dataset and algorithm
 
 wandb:
-  entity: null # wandb account name / organization name [fixme]
-  project: null # wandb project name; if not provided, defaults to root folder name [fixme]
+  entity: brianjsl-research # wandb account name / organization name [fixme]
+  project: cond-replacement # wandb project name; if not provided, defaults to root folder name [fixme]
   mode: online # set wandb logging to online, offline or dryrun
 
 resume: null # wandb run id to resume logging and loading checkpoint from
