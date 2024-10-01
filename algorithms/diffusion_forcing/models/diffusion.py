@@ -6,12 +6,19 @@ from torch import nn
 from torch.nn import functional as F
 from einops import rearrange, reduce
 
+from .backbones.unet3d_v0 import Unet3D as Unet3Dv0
+from .backbones.unet3d_v1 import Unet3D as Unet3Dv1
+from .backbones.transformer_v1 import Transformer
+from .backbones.transformer_v0 import Transformerv0
+from .backbones.dit import DiT3D, DiT1D
 from .backbones.mlp import MlpBackbone
+from .curriculum import Curriculum
 from .utils import make_beta_schedule, extract
 
 ModelPrediction = namedtuple(
     "ModelPrediction", ["pred_noise", "pred_x_start", "model_out"]
 )
+
 
 class Diffusion(nn.Module):
     def __init__(
@@ -20,6 +27,7 @@ class Diffusion(nn.Module):
         backbone_cfg: DictConfig,
         x_shape: torch.Size,
         external_cond_dim: int,
+        curriculum: Curriculum,
     ):
         super().__init__()
         self.cfg = cfg
@@ -41,19 +49,34 @@ class Diffusion(nn.Module):
         self.unknown_noise_level_prob = cfg.unknown_noise_level_prob
         self.stabilization_level = cfg.stabilization_level
 
+        self.curriculum = curriculum
+
         self._build_model()
         self._build_buffer()
 
     def _build_model(self):
         match self.backbone_cfg.name:
+            case "unet_v0":
+                model_cls = Unet3Dv0
+            case "unet_v1":
+                model_cls = Unet3Dv1
+            case "dit3d":
+                model_cls = DiT3D
+            case "dit1d":
+                model_cls = DiT1D
+            case "transformer_v1":
+                model_cls = Transformer
             case "mlp":
                 model_cls = MlpBackbone
+            case "transformer_v0":
+                model_cls = Transformerv0
             case _:
                 raise ValueError(f"unknown model type {self.model_type}")
         self.model = model_cls(
             cfg=self.backbone_cfg,
             x_shape=self.x_shape,
             external_cond_dim=self.external_cond_dim,
+            curriculum=self.curriculum,
             use_causal_mask=self.use_causal_mask,
             unknown_noise_level_prob=self.unknown_noise_level_prob,
         )
@@ -326,9 +349,22 @@ class Diffusion(nn.Module):
 
         loss = F.mse_loss(pred, target.detach(), reduction="none")
 
-        loss_weight = self.compute_loss_weights(
-            noise_levels, loss_weighting=self.loss_weighting
-        )
+        if (
+            self.loss_weighting == "fused_min_snr"
+            and noise_levels.shape[0] > self.curriculum.curr_n_tokens
+        ):  # joint training - fused snr should not be applied to independent tokens at the end of the sequences
+            seq_loss_weight = self.compute_loss_weights(
+                noise_levels[: self.curriculum.curr_n_tokens],
+                loss_weighting="fused_min_snr",
+            )
+            indep_tokens_loss_weight = self.compute_loss_weights(
+                noise_levels[self.curriculum.curr_n_tokens :], loss_weighting="min_snr"
+            )
+            loss_weight = torch.cat([seq_loss_weight, indep_tokens_loss_weight], dim=0)
+        else:
+            loss_weight = self.compute_loss_weights(
+                noise_levels, loss_weighting=self.loss_weighting
+            )
         loss_weight = self.add_shape_channels(loss_weight)
         loss = loss * loss_weight
 

@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
 import warnings
-from typing import Any, Union, Sequence, Optional
-
+from typing import Any, Union, Sequence, Dict, List, Tuple
 from lightning.pytorch.utilities.types import STEP_OUTPUT
+from lightning_utilities.core.apply_func import apply_to_collection
 from omegaconf import DictConfig
 import lightning.pytorch as pl
 import torch
@@ -10,6 +10,8 @@ import numpy as np
 from PIL import Image
 import wandb
 import einops
+from utils.print_utils import cyan
+from utils.distributed_utils import rank_zero_print
 
 
 class BasePytorchAlgo(pl.LightningModule, ABC):
@@ -22,6 +24,7 @@ class BasePytorchAlgo(pl.LightningModule, ABC):
         super().__init__()
         self.cfg = cfg
         self.debug = self.cfg.debug
+        self.should_validate_ema_weights = False
         self._build_model()
 
     @abstractmethod
@@ -93,6 +96,21 @@ class BasePytorchAlgo(pl.LightningModule, ABC):
         """
         parameters = self.parameters()
         return torch.optim.Adam(parameters, lr=self.cfg.lr)
+
+    def on_load_checkpoint(self, checkpoint: dict) -> None:
+        if self.should_validate_ema_weights:
+            self._load_ema_weights_to_state_dict(checkpoint)
+
+    def _load_ema_weights_to_state_dict(self, checkpoint: dict) -> None:
+        """
+        Load EMA weights to state dict.
+        """
+        rank_zero_print(
+            cyan(
+                "WARNING: should_validate_ema_weights is set to True, but cannot validate with EMA weights."
+            ),
+            "Please implement '_load_ema_weights_to_state_dict' in your LightningModule to validate with EMA weights.",
+        )
 
     def log_video(
         self,
@@ -175,7 +193,9 @@ class BasePytorchAlgo(pl.LightningModule, ABC):
 
             if image.shape[1] == 3:
                 if image.shape[-1] == 3:
-                    warnings.warn(f"Two channels in shape {image.shape} have size 3, assuming channel first.")
+                    warnings.warn(
+                        f"Two channels in shape {image.shape} have size 3, assuming channel first."
+                    )
                 image = einops.rearrange(image, "b c h w -> b h w c")
 
             if std is not None:
@@ -229,8 +249,42 @@ class BasePytorchAlgo(pl.LightningModule, ABC):
                 }
             )
 
+    def gather_data(
+        self, data: Union[torch.Tensor, Dict, List, Tuple], batch_dim: int = 1
+    ):
+        """
+        Gather tensors or collections of tensors from all devices,
+        and stack them along the batch dimension.
+        Args:
+            data: tensor or collection of tensors to gather
+            batch_dim: the batch dimension of the original tensor
+        """
+        # if not ddp, skip gathering and return the original data
+        if self.trainer.world_size == 1:
+            return apply_to_collection(data, torch.Tensor, lambda x: x.to(self.device))
+
+        # synchronize before gathering
+        torch.distributed.barrier()
+        gathered_data = self.all_gather(data)
+
+        # (r ... b ...) -> (... (r b) ...)
+        rearrange_fn = (
+            lambda x: x.permute(
+                list(range(1, batch_dim + 1))
+                + [0]
+                + list(range(batch_dim + 1, x.dim()))
+            )
+            .reshape(*x.shape[1 : batch_dim + 1], -1, *x.shape[batch_dim + 2 :])
+            .contiguous()
+        )
+
+        return apply_to_collection(gathered_data, torch.Tensor, rearrange_fn)
+
     def register_data_mean_std(
-        self, mean: Union[str, float, Sequence], std: Union[str, float, Sequence], namespace: str = "data"
+        self,
+        mean: Union[str, float, Sequence],
+        std: Union[str, float, Sequence],
+        namespace: str = "data",
     ):
         """
         Register mean and std of data as tensor buffer.

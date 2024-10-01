@@ -1,0 +1,10 @@
+defaults:
+  - base_numerical
+
+n_frames: 200
+context_length: 100
+data_mean: 0.0
+data_std: 0.5
+bazier_degree: 15
+purturbation: 0.05
+spike_multiplier: 20

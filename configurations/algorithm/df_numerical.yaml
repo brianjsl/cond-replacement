@@ -1,0 +1,21 @@
+defaults:
+  - df_base
+  - override backbone: transformer_v1 # see backbone folder
+
+frame_stack: 10
+scheduling_matrix: full_sequence
+is_compositional: False
+
+diffusion:
+  beta_schedule: linear
+  objective: pred_x0
+  unknown_noise_level_prob: 0.5
+  use_causal_mask: False
+  # sampling
+  sampling_timesteps: 50
+# logging and validation
+logging:
+  train_vis_freq: 2500
+  train_vis_samples: 64
+  x_lim: [0, 1]
+  y_lim: [-0.5, 0.5]

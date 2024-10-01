@@ -1,0 +1,60 @@
+defaults:
+  - base_pytorch_algo
+  - backbone: null # see backbone folder for more options
+
+# dataset-dependent configurations
+x_shape: ${dataset.observation_shape}
+n_frames: ${dataset.n_frames}
+frame_stack: 1
+frame_skip: ${dataset.frame_skip}
+context_frames: ${dataset.context_length}
+validation_multiplier: 1
+data_mean: ${dataset.data_mean}
+data_std: ${dataset.data_std}
+external_cond_dim: ${dataset.external_cond_dim}
+external_cond_stack: true
+external_cond_processing: mask_first
+# training hyperparameters
+loss: mse
+weight_decay: 1e-3
+warmup_steps: 5000
+optimizer_beta: [0.9, 0.999]
+noise_level: random_all
+noiseless_context: false
+noise_level_kwargs: {}
+# sampling scheme
+uncertainty_scale: 1
+chunk_size: -1
+scheduling_matrix: autoregressive
+start_exponent: 1.0
+end_exponent: 0.5
+replacement: scale
+# compositionality
+is_compositional: False
+# guidance
+guidance_scale: 0.0
+
+diffusion:
+  timesteps: 1000
+  beta_schedule: cosine
+  schedule_fn_kwargs:
+    shift: 1.0 # ideally 1 / frame_stack
+  use_causal_mask: True
+  clip_noise: 20.0
+  # training
+  objective: pred_v
+  unknown_noise_level_prob: 0.0
+  loss_weighting: min_snr
+  snr_clip: 5.0
+  cum_snr_decay: 0.9
+  # sampling
+  sampling_timesteps: 50
+  ddim_sampling_eta: 0.0
+  stabilization_level: 0
+  reconstruction_guidance: 0 
+
+curriculum: null
+
+# logging and validation
+logging:
+  loss_freq: 100

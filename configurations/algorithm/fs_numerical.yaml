@@ -1,0 +1,10 @@
+defaults:
+  - df_numerical
+  - override backbone: transformer # see backbone folder
+
+chunk_size: -1
+scheduling_matrix: full_sequence
+noise_level: random_uniform
+
+diffusion:
+  reconstruction_guidance: 0.0

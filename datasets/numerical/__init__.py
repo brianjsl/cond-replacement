@@ -1,1 +1,1 @@
-from .function2d import LinearNoisy
+from .function1d import LinearNoisy

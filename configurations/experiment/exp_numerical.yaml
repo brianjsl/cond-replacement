@@ -1,0 +1,21 @@
+defaults:
+  - base_pytorch
+
+tasks: [training]
+
+training:
+  lr: 1e-3
+  precision: 16-mixed
+  batch_size: 2048 
+  max_steps: 10005 # 10k steps should be enough for large, and 100k for medium
+  data:
+    num_workers: 4 # number of CPU threads for data preprocessing.
+
+  checkpointing:
+    every_n_train_steps: 10000 # save a checkpoint every n train steps
+
+validation:
+  batch_size: 64
+  val_every_n_step: 2000 # change to 1 when visualizing a trained checkpoint
+  val_every_n_epoch: null # change to null when visualizing a trained checkpoint
+  limit_batch: 1

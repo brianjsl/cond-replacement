@@ -1,8 +1,8 @@
 # configuration parsing starts here
 defaults:
-  - experiment: exp_2d # experiment yaml file name in configurations/experiments folder [fixme]
-  - dataset: numerical_linear # dataset yaml file name in configurations/dataset folder [fixme]
-  - algorithm: diff_replacement # algorithm yaml file name in configurations/algorithm folder [fixme]
+  - experiment: exp_numerical # experiment yaml file name in configurations/experiments folder [fixme]
+  - dataset: numerical_diagonal # dataset yaml file name in configurations/dataset folder [fixme]
+  - algorithm: fs_numerical # algorithm yaml file name in configurations/algorithm folder [fixme]
   - cluster: null # optional, cluster yaml file name in configurations/cluster folder. Leave null for local compute
 
 debug: false # global debug flag will be passed into configuration of experiment, dataset and algorithm

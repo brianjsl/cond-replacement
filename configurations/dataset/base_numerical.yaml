@@ -1,0 +1,10 @@
+defaults:
+  - base_dataset
+
+observation_shape: [1]
+n_frames: ???
+frame_skip: 1
+context_length: ???
+data_mean: ???
+data_std: ???
+external_cond_dim: 0

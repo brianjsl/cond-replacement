@@ -1,4 +1,4 @@
-from datasets.numerical.function2d import LinearNoisy
+from datasets.numerical.function1d import LinearNoisy
 from omegaconf import DictConfig
 import yaml
 import matplotlib.pyplot as plt
