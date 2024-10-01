@@ -130,3 +130,57 @@ class DoubleConeDataset(Function1DDataset):
         output_dict = dict(xs=y)
 
         return output_dict
+
+
+class DiagonalDataset(DoubleConeDataset):
+    def base_function(self, t: np.ndarray | float) -> np.ndarray | float:
+        if np.random.random() < 0.5:
+            y = 0.5 - t
+        else:
+            y = t - 0.5
+        if self.split != "training":
+            y[t < 0.5] = 0
+        return y
+
+class HorizontalDataset(DoubleConeDataset):
+    def base_function(self, t: np.ndarray | float) -> np.ndarray | float:
+        c = np.random.random() - 0.5
+        y = np.full_like(t, c)
+        if self.split != "training":
+            override = (t - 0.4) * (np.random.random() * 2 - 1) + c
+            y[t < 0.4] = override[t < 0.4]
+        return y
+
+    def __getitem__(self, idx) -> Dict:
+        t = np.linspace(0, 1, self.n_frames)
+        y = self.base_function(t)
+        y = torch.from_numpy(y).float()[..., None]
+
+        output_dict = dict(xs=y)
+
+        return output_dict
+
+
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    from torch.utils.data import DataLoader
+
+    cfg = DictConfig(
+        {
+            "n_frames": 200,
+            "bazier_degree": 15,
+            "purturbation": 0.05,
+            "spike_multiplier": 10,
+        }
+    )
+    split = "training"
+    # split = "validation"
+    dataset = Function1DDataset(cfg, split=split)
+    dataloader = DataLoader(dataset, batch_size=50)
+    for d in dataloader:
+        for y in d["xs"][:, :, 0]:
+            t = np.linspace(0, 1, len(y))
+            plt.plot(t, y)
+        plt.show()
+        break
+    plt.savefig("outputs/debug.png")

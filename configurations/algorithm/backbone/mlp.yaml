@@ -1,0 +1,5 @@
+name: mlp 
+num_layers: 6
+network_size: 128
+n_tokens: 20
+time_emb_type: null

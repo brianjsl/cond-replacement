@@ -6,12 +6,13 @@ import torch
 import torch.nn as nn
 import wandb
 from einops import rearrange, repeat, reduce
-from PIL import Image
+from PIL import Image, ImageFile
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+import os
+from pytorch_lightning.utilities import rank_zero_only
 
 from .df_base import DiffusionForcingBase
-
 
 class DiffusionForcingNumerical(DiffusionForcingBase):
     def __init__(self, cfg: DictConfig):
@@ -38,6 +39,7 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
         self.log_dict({f"{namespace}/loss": torch.stack(loss_stats).mean()})
         self.validation_step_outputs = []
 
+    @rank_zero_only
     def _visualize(self, xs, name):
         # xs ~ (t b c)
         xs = xs.detach().cpu().numpy()
@@ -54,5 +56,7 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
             # color = "b" if xs[0, i] > 0 else "r"
             color = xs[0, i] + 0.5
             plt.plot(t, xs[:, i], c=cmap(color), alpha=0.2)
-        plt.savefig(f"/tmp/numerical.png")
-        self.logger.experiment.log({name: wandb.Image(f"/tmp/numerical.png")})
+
+        image_path = f'/tmp/numerical.png'
+        plt.savefig(image_path)
+        self.logger.experiment.log({name: wandb.Image(image_path)})

@@ -1,1 +1,1 @@
-from .function1d import LinearNoisy
+from .function1d import DoubleConeDataset, DiagonalDataset, HorizontalDataset

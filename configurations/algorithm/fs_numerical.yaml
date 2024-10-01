@@ -1,6 +1,6 @@
 defaults:
   - df_numerical
-  - override backbone: transformer # see backbone folder
+  - override backbone: transformer_v1 # see backbone folder
 
 chunk_size: -1
 scheduling_matrix: full_sequence
