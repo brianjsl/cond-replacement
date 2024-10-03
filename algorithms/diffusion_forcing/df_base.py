@@ -57,6 +57,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
         )
 
         self.validation_multiplier = cfg.validation_multiplier
+        self.context_inputs = []
         self.validation_step_outputs = []
 
         match cfg.loss:
@@ -70,7 +71,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
     @staticmethod
     def _build_static_curriculum(cfg: DictConfig) -> Curriculum:
         return Curriculum.static(
-            n_tokens=cfg.n_frames // cfg.frame_stack,
+            n_tokens=cfg.n_frames // (cfg.frame_stack * 2),
             n_context_tokens=cfg.context_frames // cfg.frame_stack,
         )
 
@@ -158,7 +159,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
         Get the number of tokens to be processed.
         """
         return round(
-            self.max_tokens
+           self.max_tokens
             * (1 if self.trainer.training else self.validation_multiplier)
         )
 
@@ -224,10 +225,6 @@ class DiffusionForcingBase(BasePytorchAlgo):
         #     xs = torch.cat([xs, pad], 1)
 
         if self.external_cond_dim:
-            if conditions.shape[-1] != self.external_cond_dim:
-                raise ValueError(
-                    f"Expected external condition dim {self.external_cond_dim}, got {conditions.shape[-1]}."
-                )
             # if self.padding > 0:
             #     conditions = nn.functional.pad(conditions, (0, 0, 0, self.padding))
 
@@ -237,6 +234,11 @@ class DiffusionForcingBase(BasePytorchAlgo):
                 t=self.n_tokens,
                 fs=self.frame_stack,
             ).contiguous()
+
+            if conditions.shape[-1] != self.external_cond_dim:
+                raise ValueError(
+                    f"Expected external condition dim {self.external_cond_dim}, got {conditions.shape[-1]}."
+                )
 
         xs = rearrange(
             xs,

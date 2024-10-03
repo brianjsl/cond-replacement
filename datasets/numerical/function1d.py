@@ -19,6 +19,7 @@ class Function1DDataset(ABC, torch.utils.data.Dataset):
         super().__init__()
         self.cfg = cfg
         self.split = split
+        self.conditional = cfg.conditional
         self.n_frames = cfg.n_frames
         self.context_length = cfg.context_length
         np.random.seed(0)
@@ -28,7 +29,7 @@ class Function1DDataset(ABC, torch.utils.data.Dataset):
         raise NotImplementedError
 
     def __len__(self):
-        return 100000000
+        return 2048000
 
     @abstractmethod
     def __getitem__(self, idx) -> Dict:
@@ -111,10 +112,13 @@ class DoubleConeDataset(Function1DDataset):
         y_original = y_original[self.context_length :]
         y = np.concatenate((y_purturb, y_original))
         # y = curve.evaluate_multi(t)[1]
-
+    
         return y
 
     def __getitem__(self, idx) -> Dict:
+        '''
+        Returns a random trajectory  
+        '''
         t = np.linspace(0, 1, self.n_frames)
         purturbation = np.ones(self.n_nodes) * self.purturbation
         purturbation[0] = 0
@@ -127,7 +131,12 @@ class DoubleConeDataset(Function1DDataset):
         y = self.purturb_function(t, purturbation)
         y = torch.from_numpy(y).float()[..., None]
 
-        output_dict = dict(xs=y)
+        if self.conditional:
+            conditions = y[: self.context_length, :]
+            y = y[self.context_length :, :]
+            output_dict = dict(xs = y, conds=conditions)
+        else:   
+            output_dict = dict(xs=y)
 
         return output_dict
 

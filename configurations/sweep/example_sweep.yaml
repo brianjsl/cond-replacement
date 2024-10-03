@@ -10,11 +10,9 @@ metric:
 
 parameters:
   # Sweep params
-  algorithm.lr:
-    values: [1e-3, 1e-4]
-  experiment.training.batch_size:
-    values: [32, 64]
-
+  algorithm.diffusion.reconstruction_guidance:
+    values: [0.0, 0.5, 5.0, 10.0]
+  
   # Default params
   wandb.mode:
     value: online

@@ -5,6 +5,8 @@ defaults:
 chunk_size: -1
 scheduling_matrix: full_sequence
 noise_level: random_uniform
+# warmup_steps: 100 #reduced to 100
+conditional: true
 
 diffusion:
-  reconstruction_guidance: 0.0
+  reconstruction_guidance: [0.0]

@@ -1,10 +1,11 @@
 defaults:
   - base_numerical
 
-n_frames: 200
-context_length: 100
+n_frames: 200 #number of points (0,1)
+context_length: 100 #length of context (usually half of n_frames)
 data_mean: 0.0
 data_std: 0.5
-bazier_degree: 15
+bazier_degree: 15 #number of points used-1
 purturbation: 0.05
 spike_multiplier: 20
+conditional: true

@@ -14,14 +14,16 @@ data_std: ${dataset.data_std}
 external_cond_dim: ${dataset.external_cond_dim}
 external_cond_stack: true
 external_cond_processing: mask_first
+
 # training hyperparameters
 loss: mse
 weight_decay: 1e-3
-warmup_steps: 5000
+warmup_steps: 5000 #reduced to 100
 optimizer_beta: [0.9, 0.999]
 noise_level: random_all
 noiseless_context: false
 noise_level_kwargs: {}
+
 # sampling scheme
 uncertainty_scale: 1
 chunk_size: -1
@@ -29,8 +31,10 @@ scheduling_matrix: autoregressive
 start_exponent: 1.0
 end_exponent: 0.5
 replacement: scale
+
 # compositionality
 is_compositional: False
+
 # guidance
 guidance_scale: 0.0
 

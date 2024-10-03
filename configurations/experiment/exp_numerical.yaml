@@ -12,10 +12,14 @@ training:
     num_workers: 4 # number of CPU threads for data preprocessing.
 
   checkpointing:
-    every_n_train_steps: 10000 # save a checkpoint every n train steps
+    every_n_train_steps: 200 # save a checkpoint every n train steps
 
 validation:
   batch_size: 64
-  val_every_n_step: 2000 # change to 1 when visualizing a trained checkpoint
+  val_every_n_step: 1000 # change to 1 when visualizing a trained checkpoint
   val_every_n_epoch: null # change to null when visualizing a trained checkpoint
   limit_batch: 1
+  inference_mode: False
+
+test:
+  inference_mode: False

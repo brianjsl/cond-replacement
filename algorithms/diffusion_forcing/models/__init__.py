@@ -1,2 +1,2 @@
 from .diffusion import Diffusion
-from .curriculum import Curriculum
+from .curriculum import Curriculum  
