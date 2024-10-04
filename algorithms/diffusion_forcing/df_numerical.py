@@ -44,7 +44,6 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
     
     def on_validation_epoch_end(self, namespace="validation") -> None:
         loss_stats = []
-        self._viualize()
         for i, out in enumerate(self.validation_step_outputs):
             for rg in self.cfg.diffusion.reconstruction_guidance:
                 (_, xs_pred, loss) = out[rg]
@@ -88,11 +87,14 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
         rg_losses = {}
 
         for rg in self.cfg.diffusion.reconstruction_guidance:
-            xs_pred, _ = self.predict_sequence(
-                xs[: self.n_context_tokens],
+            xs_pred, _= self._sample_sequence(
+                xs.shape[1],
+                xs.shape[0],
+                None,
+                None,
                 conditions,
-                reconstruction_guidance=rg,
-                compositional=self.is_compositional,
+                None,
+                rg 
             )
 
             # FIXME: loss
@@ -103,8 +105,9 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
             xs_pred_copy = self._unstack_and_unnormalize(xs_pred).detach().cpu()
 
             if self.is_conditional:
-                xs_copy = torch.cat([conditions, xs_copy])
-                xs_pred_copy = torch.cat([conditions, xs_pred_copy])
+                conditions_vis = rearrange(conditions, "t b c -> (t c) b 1").contiguous().detach().cpu()
+                xs_copy = torch.cat([conditions_vis, xs_copy])
+                xs_pred_copy = torch.cat([conditions_vis, xs_pred_copy])
 
             rg_losses[rg] = (xs_copy,xs_pred_copy,loss)
 

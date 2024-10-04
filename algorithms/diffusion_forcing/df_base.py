@@ -422,6 +422,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
             #     )
 
         hist = None
+      
         while curr_token < length:
             if hist is not None:
                 raise ValueError(
@@ -533,7 +534,8 @@ class DiffusionForcingBase(BasePytorchAlgo):
                     f"for noncausal models, conditions length is expected to be {self.max_tokens}, got {len(conditions)}."
                 )
 
-        replacement_mask = context_mask.bool()  # both -1 and 1 map to True
+        if context_mask:
+            replacement_mask = context_mask.bool()  # both -1 and 1 map to True
 
         # compositional = compositional and self.unknown_noise_level_prob > 0
         h = length if self.use_causal_mask else self.max_tokens
@@ -542,6 +544,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
         xs_pred = torch.clamp(xs_pred, -self.clip_noise, self.clip_noise)
         if context is None:
             context = torch.zeros_like(xs_pred)
+            context_mask = torch.zeros_like(xs_pred)
             replacement_mask = torch.zeros_like(xs_pred, dtype=torch.bool)
         elif not self.use_causal_mask:
             padding = self.max_tokens - length
