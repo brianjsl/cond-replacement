@@ -9,7 +9,7 @@ noise_level: random_uniform
 conditional: true
 
 diffusion:
-  reconstruction_guidance: [0.0, 20.0, 50.0, 100.0]
+  reconstruction_guidance: [0.0, 5.0, 10.0]
 
 logging:
   train_vis_freq: 1000

@@ -203,7 +203,7 @@ if __name__ == "__main__":
     )
     # split = "training"
     split = "validation"
-    dataset = ExponentialDataset(cfg, split=split)
+    dataset = DoubleConeDataset(cfg, split=split)
     dataloader = DataLoader(dataset, batch_size=50)
     for d in dataloader:
         for y in d["xs"][:, :, 0]:
