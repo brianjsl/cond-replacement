@@ -1,4 +1,4 @@
-from datasets.numerical import DoubleConeDataset, DiagonalDataset, HorizontalDataset
+from datasets.numerical import DoubleConeDataset, DiagonalDataset, HorizontalDataset, ExponentialDataset
 from algorithms.diffusion_forcing import DiffusionForcingNumerical
 from .exp_base import BaseLightningExperiment
 
@@ -35,5 +35,6 @@ class NumericalExperiment(BaseLightningExperiment):
         # Planning datasets
         numerical_diagonal=DiagonalDataset,
         numerical_dcone=DoubleConeDataset,
+        numerical_exp=ExponentialDataset,
         numerical_horizontal=HorizontalDataset,
     )

@@ -63,6 +63,7 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
         # xs ~ (t b c)
         xs = xs.detach().cpu().numpy()
         subsample = 4
+        xs_start = xs[0, :, 0]
         xs = xs[::subsample, :, 0]
         steps, batch_size = xs.shape
 
@@ -70,11 +71,11 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
         plt.clf()
         plt.xlim(*self.logging.x_lim)
         plt.ylim(*self.logging.y_lim)
-        cmap = cm.get_cmap("coolwarm")
+        # cmap = cm.get_cmap("coolwarm")
         for i in range(batch_size):
-            # color = "b" if xs[0, i] > 0 else "r"
-            color = xs[0, i] + 0.5
-            plt.plot(t, xs[:, i], c=cmap(color), alpha=0.2)
+            color = "b" if xs_start[i] > 0 else "r"
+            # color = xs[0, i] 
+            plt.plot(t, xs[:, i], c=color, alpha=0.2)
 
         image_path = f'/tmp/numerical.png'
         plt.savefig(image_path)
@@ -87,14 +88,23 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
         rg_losses = {}
 
         for rg in self.cfg.diffusion.reconstruction_guidance:
-            xs_pred, _= self._sample_sequence(
-                xs.shape[1],
-                xs.shape[0],
-                None,
-                None,
-                conditions,
-                None,
-                rg 
+            if self.is_conditional:
+                xs_pred, _= self._sample_sequence(
+                    xs.shape[1],
+                    xs.shape[0],
+                    None,
+                    None,
+                    conditions,
+                    None,
+                    rg 
+                )
+            else:
+                xs_pred, _ = self.predict_sequence(
+                    xs[: self.n_context_tokens],
+                    len(xs),
+                    conditions,
+                    reconstruction_guidance=rg,
+                    compositional=self.is_compositional,
             )
 
             # FIXME: loss
@@ -109,7 +119,9 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
                 xs_copy = torch.cat([conditions_vis, xs_copy])
                 xs_pred_copy = torch.cat([conditions_vis, xs_pred_copy])
 
-            rg_losses[rg] = (xs_copy,xs_pred_copy,loss)
+                rg_losses[rg] = (xs_copy,xs_pred_copy,loss)
+            else:
+                rg_losses[rg] = (xs, xs_pred, loss)
 
         self.validation_step_outputs.append(rg_losses)
 

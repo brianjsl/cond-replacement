@@ -140,8 +140,23 @@ class DoubleConeDataset(Function1DDataset):
 
         return output_dict
 
+class ExponentialDataset(DoubleConeDataset):
+    def __init__(self, cfg: DictConfig, split: str = "training"):
+        super().__init__(cfg, split)
+        self.alpha = cfg.alpha
+        self.epsilon = 1e-5
+    
+    def base_function(self, t: np.ndarray) -> np.ndarray | float:
+        k = np.random.random() * 2 - 1
+        if k >= 0:
+            y = (np.exp(k * t*self.alpha)-1) / (2 * np.exp(self.alpha)) + self.epsilon
+        else:
+            y = (-np.exp(-k * t * self.alpha)+1)/(2 * np.exp(self.alpha)) - self.epsilon
+        return y
+    
 
 class DiagonalDataset(DoubleConeDataset):
+
     def base_function(self, t: np.ndarray | float) -> np.ndarray | float:
         if np.random.random() < 0.5:
             y = 0.5 - t
@@ -178,18 +193,23 @@ if __name__ == "__main__":
         {
             "n_frames": 200,
             "bazier_degree": 15,
-            "purturbation": 0.05,
-            "spike_multiplier": 10,
+            "purturbation": 0.01,
+            "spike_multiplier": 20,
+            "alpha": 4,
+            "conditional": False,
+            "external_cond_dim": False,
+            "context_length": 100
         }
     )
-    split = "training"
-    # split = "validation"
-    dataset = Function1DDataset(cfg, split=split)
+    # split = "training"
+    split = "validation"
+    dataset = ExponentialDataset(cfg, split=split)
     dataloader = DataLoader(dataset, batch_size=50)
     for d in dataloader:
         for y in d["xs"][:, :, 0]:
             t = np.linspace(0, 1, len(y))
-            plt.plot(t, y)
+            col = 'b' if y[0] < 0 else 'r'
+            plt.plot(t, y, color=col)
         plt.show()
         break
     plt.savefig("outputs/debug.png")

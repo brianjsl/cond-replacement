@@ -71,7 +71,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
     @staticmethod
     def _build_static_curriculum(cfg: DictConfig) -> Curriculum:
         return Curriculum.static(
-            n_tokens=cfg.n_frames // (cfg.frame_stack * 2),
+            n_tokens=cfg.n_frames // (cfg.frame_stack),
             n_context_tokens=cfg.context_frames // cfg.frame_stack,
         )
 
@@ -534,7 +534,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
                     f"for noncausal models, conditions length is expected to be {self.max_tokens}, got {len(conditions)}."
                 )
 
-        if context_mask:
+        if context_mask is not None:
             replacement_mask = context_mask.bool()  # both -1 and 1 map to True
 
         # compositional = compositional and self.unknown_noise_level_prob > 0

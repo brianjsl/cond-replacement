@@ -9,4 +9,10 @@ noise_level: random_uniform
 conditional: true
 
 diffusion:
-  reconstruction_guidance: [0.0]
+  reconstruction_guidance: [0.0, 20.0, 50.0, 100.0]
+
+logging:
+  train_vis_freq: 1000
+  train_vis_samples: 64
+  x_lim: [0, 1]
+  y_lim: [-0.5, 0.5]
