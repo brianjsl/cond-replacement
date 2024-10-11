@@ -154,6 +154,21 @@ class ExponentialDataset(DoubleConeDataset):
             y = (-np.exp(-k * t * self.alpha)+1)/(2 * np.exp(self.alpha)) - self.epsilon
         return y
     
+class BimodalDataset(DoubleConeDataset):
+    def __init__(self, cfg: DictConfig, split: str = "training"):
+        super().__init__(cfg, split)
+        self.alpha = cfg.alpha
+
+    def base_function(self, t: np.ndarray) -> np.ndarray | float:
+        up = np.random.random() > 0.5
+        theta = np.random.random() 
+        b = (1 if theta > 0.5 else -1)*0.5 + np.random.random()
+        y = 2*(b-(1 if up else -1))*t + (1 if up else -1)
+        k = np.random.random()+2
+        y[self.context_length:] = (1 if theta > 0.5 else -1)*np.exp(k * self.alpha * 
+        (t[self.context_length:] - t[self.context_length]))+ (-1 if theta > 0.5 else 1) +y[self.context_length-1]
+        return y
+    
 
 class DiagonalDataset(DoubleConeDataset):
 
@@ -195,16 +210,16 @@ if __name__ == "__main__":
             "bazier_degree": 15,
             "purturbation": 0.01,
             "spike_multiplier": 20,
-            "alpha": 4,
+            "alpha": 1,
             "conditional": False,
             "external_cond_dim": False,
             "context_length": 100
         }
     )
-    # split = "training"
-    split = "validation"
-    dataset = DoubleConeDataset(cfg, split=split)
-    dataloader = DataLoader(dataset, batch_size=50)
+    split = "training"
+    # split = "validation"
+    dataset = BimodalDataset(cfg, split=split)
+    dataloader = DataLoader(dataset, batch_size=20)
     for d in dataloader:
         for y in d["xs"][:, :, 0]:
             t = np.linspace(0, 1, len(y))

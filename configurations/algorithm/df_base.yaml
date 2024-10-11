@@ -37,6 +37,7 @@ is_compositional: False
 
 # guidance
 guidance_scale: 0.0
+history_guidance_scale: 0
 
 diffusion:
   timesteps: 1000
