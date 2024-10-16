@@ -234,25 +234,25 @@ class DiffusionForcingBase(BasePytorchAlgo):
 
             conditions = rearrange(
                 batch["conds"],
-                "b (n t fs) d -> t (b n) (fs d)",
+                "b (n t fs) d -> (b n) t (fs d)",
                 t=self.n_tokens,
                 fs=self.frame_stack,
-            ).contiguous()
+            )
 
         xs = rearrange(
             xs,
-            "b (n t fs) c ... -> t (b n) (fs c) ...",
+            "b (n t fs) c ... -> (b n) t (fs c) ...",
             fs=self.frame_stack,
             t=self.n_tokens,
-        ).contiguous()
+        )
 
         if "masks" in batch:
             masks = rearrange(
                 batch["masks"],
-                "b (n t fs) ... -> t (b n) fs ...",
+                "b (n t fs) ... -> (b n) t fs ...",
                 fs=self.frame_stack,
                 t=self.n_tokens,
-            ).contiguous()
+            )
         else:
             masks = torch.ones(*xs.shape[:2], self.frame_stack).bool().to(self.device)
 
@@ -268,7 +268,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
     def training_step(self, batch, batch_idx, namespace="training") -> STEP_OUTPUT:
         xs, conditions, masks, *_ = batch
         conditions = self._process_conditions(conditions)
-        n_tokens, batch_size, *_ = xs.shape
+        batch_size, n_tokens, *_ = xs.shape
 
         if self.cfg.noise_level == "random_curr":  # for teacher forcing
             raise NotImplementedError
@@ -276,30 +276,30 @@ class DiffusionForcingBase(BasePytorchAlgo):
             t = torch.randint(1, n_tokens + 1, (1,)).item()
             noise_levels = torch.cat(
                 [
-                    self._generate_noise_levels(xs[:t], masks),
+                    self._get_training_noise_levels(xs[:, :t], masks),
                     torch.zeros(
-                        n_tokens - t, batch_size, dtype=torch.long, device=xs.device
+                        batch_size, n_tokens - t, dtype=torch.long, device=xs.device
                     ),
                 ],
-                0,
+                1,
             )
             xs_pred, loss = self.diffusion_model(
                 xs, conditions, noise_levels=noise_levels
             )
             # only consider the loss of the chosen frame
-            loss = loss[t - 1 : t]
-            masks = masks[(t - 1) * self.frame_stack : t * self.frame_stack]
-            xs, xs_pred = xs[:t], xs_pred[:t]
+            loss = loss[:, t - 1 : t]
+            masks = masks[:, (t - 1) * self.frame_stack : t * self.frame_stack]
+            xs, xs_pred = xs[:, :t], xs_pred[:, :t]
 
         else:
             xs_pred, loss = self.diffusion_model(
                 xs,
                 conditions,
-                noise_levels=self._generate_noise_levels(xs, masks),
+                k=self._get_training_noise_levels(xs, masks),
             )
 
         if self.cfg.noiseless_context:
-            masks[: self.n_context_tokens * self.frame_stack] = False
+            masks[:, : self.n_context_tokens * self.frame_stack] = False
 
         loss = self._reweight_loss(loss, masks)
 
@@ -360,12 +360,11 @@ class DiffusionForcingBase(BasePytorchAlgo):
         ] * self.n_context_tokens
 
         xs_pred, _ = self.predict_sequence(
-            xs[: self.n_context_tokens],
-            len(xs),
+            xs[:, : self.n_context_tokens],
+            xs.shape[1],
             conditions,
             reconstruction_guidance=self.cfg.diffusion.reconstruction_guidance,
             context_guidance=context_guidance,
-            compositional=self.is_compositional,
         )
 
         # FIXME: loss
@@ -400,36 +399,34 @@ class DiffusionForcingBase(BasePytorchAlgo):
         guidance_fn: Optional[Callable] = None,
         reconstruction_guidance: float = 0.0,
         context_guidance: Optional[Sequence[float]] = None,
-        compositional: bool = False,
         return_hist: bool = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Predict a sequence using the model, using context tokens at the front.
         Args:
-            context: shape (context_len, batch_size, *self.x_stacked_shape)
+            context: shape (batch_size, context_len, *self.x_stacked_shape)
             length: number of tokens in sampled sequence, if None, fall back to to self.max_tokens, if bigger than self.max_tokens, will use sliding window sampling.
             conditions: external conditions for sampling, e.g. action or text, optional
             guidance_fn: guidance function for sampling, optional
             reconstruction_guidance: the scale of reconstruction guidance (from Video Diffusion Models Ho. et al.)
             context_guidance: context guidance from diffusion forcing 2, must be a sequence of float with length context+1. nth entry correspond to the weight
-            return_hist: if True, return history of xs_pred (m, length, batch_size, *self.x_stacked_shape) on cpu. None otherwise.
+            return_hist: if True, return history of xs_pred (m, batch_size, length, *self.x_stacked_shape) on cpu. None otherwise.
 
         Returns:
-            xs_pred: shape (length, batch_size, *self.x_stacked_shape)
-            hist: optional. if return_hist is True, return history of xs_pred (m, length, batch_size, *self.x_stacked_shape) on cpu. None otherwise.
+            xs_pred: shape (batch_size, length, *self.x_stacked_shape)
+            hist: optional. if return_hist is True, return history of xs_pred (m, batch_size, length, *self.x_stacked_shape) on cpu. None otherwise.
         """
         if length is None:
             length = self.max_tokens
         xs_pred = context
         x_shape = self.x_stacked_shape
-        batch_size = context.shape[1]
-        curr_token = xs_pred.shape[0]
-        gt_len = context.shape[0]
+        batch_size, curr_token, *_ = context.shape
+        gt_len = curr_token
 
         # if self.n_context_tokens < curr_token:
         #     raise ValueError("self.n_context_tokens should be < length of context.")
         if conditions is not None:
-            if len(conditions) < length:
+            if conditions.shape[1] < length:
                 raise ValueError(
                     f"conditions length is expected to be at least the length {length}."
                 )
@@ -452,40 +449,40 @@ class DiffusionForcingBase(BasePytorchAlgo):
             # actual context depends on whether it's during sliding window or not
             c = min(self.n_context_tokens, curr_token)
             if conditions is not None and not self.use_causal_mask:
-                c = max(c, curr_token - (len(conditions) - self.max_tokens))
+                c = max(c, curr_token - (conditions.shape[1] - self.max_tokens))
 
             # try biggest prediction chunk size
             h = min(length - curr_token, self.max_tokens - c)
             # self.chunk_size clips how many future tokens are diffused at once
             h = min(h, self.chunk_size) if self.chunk_size > 0 else h
             l = c + h
-            pad = torch.zeros((h, batch_size, *x_shape))
+            pad = torch.zeros((batch_size, h, *x_shape))
             # context is last c tokens out of the sequence of generated/gt tokens
             # pad to length that's required by _sample_sequence
-            context = torch.cat([xs_pred[-c:], pad.to(xs_pred.device)])
+            context = torch.cat([xs_pred[:, -c:], pad.to(self.device)], 1)
             # calculate number of model generated tokens (not GT context tokens)
             generated_len = curr_token - max(curr_token - c, gt_len)
             # make context mask
-            context_mask = torch.ones((c, batch_size, *x_shape), dtype=torch.bool)
-            context_mask = torch.cat([context_mask, pad.bool()]).to(context.device)
+            context_mask = torch.ones((batch_size, c, *x_shape), dtype=torch.bool)
+            context_mask = torch.cat([context_mask, pad.bool()], 1).to(context.device)
             # base context noise level, -1 for GT, stabilization_level - 1 for generated tokens
-            context_k = torch.full((c, batch_size), -1, dtype=torch.long)
+            context_k = torch.full((batch_size, c), -1, dtype=torch.long)
             if generated_len > 0:
-                context_k[-generated_len:] = self.stabilization_level - 1
-            pad = torch.zeros((h, batch_size), dtype=torch.long)
-            context_k = torch.cat([context_k, pad]).to(context.device)
+                context_k[:, -generated_len:] = self.stabilization_level - 1
+            pad = torch.zeros((batch_size, h), dtype=torch.long)
+            context_k = torch.cat([context_k, pad], 1).to(context.device)
 
             if context_guidance is not None:
                 context_k = repeat(
-                    context_k, "t b ... -> cg t b ...", cg=len(context_guidance)
+                    context_k, "b t ... -> cg b t ...", cg=len(context_guidance)
                 ).clone()  # clone to actually copy memory
                 for i, t in enumerate(context_guidance_indices):
-                    context_k[i, : -h - t] = self.timesteps - 1
+                    context_k[i, :, : -h - t] = self.timesteps - 1
 
             cond_len = l if self.use_causal_mask else self.max_tokens
             cond_slice = None
             if conditions is not None:
-                cond_slice = conditions[curr_token - c : curr_token - c + cond_len]
+                cond_slice = conditions[:, curr_token - c : curr_token - c + cond_len]
 
             new_pred, hist = self._sample_sequence(
                 batch_size,
@@ -497,11 +494,10 @@ class DiffusionForcingBase(BasePytorchAlgo):
                 guidance_fn=guidance_fn,
                 reconstruction_guidance=reconstruction_guidance,
                 context_guidance=context_guidance,
-                compositional=compositional,
                 return_hist=return_hist,
             )
-            xs_pred = torch.cat([xs_pred, new_pred[-h:]])
-            curr_token = xs_pred.shape[0]
+            xs_pred = torch.cat([xs_pred, new_pred[:, -h:]], 1)
+            curr_token = xs_pred.shape[1]
         return xs_pred, hist
 
     def _sample_sequence(
@@ -515,7 +511,6 @@ class DiffusionForcingBase(BasePytorchAlgo):
         guidance_fn: Optional[Callable] = None,
         reconstruction_guidance: float = 0.0,
         context_guidance: Optional[torch.Tensor] = None,
-        compositional: bool = False,
         return_hist: bool = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
@@ -532,14 +527,13 @@ class DiffusionForcingBase(BasePytorchAlgo):
             guidance_fn: guidance function for sampling
             reconstruction_guidance: the scale of reconstruction guidance for True entries in context_mask
             context_guidance: context guidance from diffusion forcing 2, must be a sequence of floats that sum to 1. nth entry correspond to the weight to the nth context_k
-            compositional: if True, sample with context frames as unknown noise level tokens
             return_hist: if True, return all steps of the sampling process
         Returns:
             xs_pred: shape (length, batch_size, *self.x_stacked_shape)
             hist: if True, history of xs_pred (m, length, batch_size, *self.x_stacked_shape) on cpu. None otherwise.
         """
         if length is None:
-            length = self.max_tokens if context is None else context.shape[0]
+            length = self.max_tokens if context is None else context.shape[1]
 
         x_shape = self.x_stacked_shape
 
@@ -551,13 +545,13 @@ class DiffusionForcingBase(BasePytorchAlgo):
         if context is not None:
             if context_mask is None:
                 raise ValueError("context_mask must be provided if context is given.")
-            if context.shape[1] != batch_size:
+            if context.shape[0] != batch_size:
                 raise ValueError(
-                    f"context batch size is expected to be {batch_size} but got {context.shape[1]}."
+                    f"context batch size is expected to be {batch_size} but got {context.shape[0]}."
                 )
-            if context.shape[0] != length:
+            if context.shape[1] != length:
                 raise ValueError(
-                    f"context length is expected to be {length} but got {context.shape[0]}."
+                    f"context length is expected to be {length} but got {context.shape[1]}."
                 )
             if tuple(context.shape[2:]) != tuple(x_shape):
                 raise ValueError(
@@ -586,13 +580,13 @@ class DiffusionForcingBase(BasePytorchAlgo):
                 )
 
         if conditions is not None:
-            if self.use_causal_mask and len(conditions) != length:
+            if self.use_causal_mask and conditions.shape[1] != length:
                 raise ValueError(
-                    f"for causal models, conditions length is expected to be {length}, got {len(conditions)}."
+                    f"for causal models, conditions length is expected to be {length}, got {conditions.shape[1]}."
                 )
-            elif not self.use_causal_mask and len(conditions) != self.max_tokens:
+            elif not self.use_causal_mask and conditions.shape[1] != self.max_tokens:
                 raise ValueError(
-                    f"for noncausal models, conditions length is expected to be {self.max_tokens}, got {len(conditions)}."
+                    f"for noncausal models, conditions length is expected to be {self.max_tokens}, got {conditions.shape[1]}."
                 )
 
         if self.stabilization_level > 0 and not self.is_diffusion_forcing:
@@ -604,20 +598,22 @@ class DiffusionForcingBase(BasePytorchAlgo):
         padding = 0
 
         # create intial xs_pred with noise
-        xs_pred = torch.randn((h, batch_size, *x_shape), device=self.device)
+        xs_pred = torch.randn((batch_size, h, *x_shape), device=self.device)
         xs_pred = torch.clamp(xs_pred, -self.clip_noise, self.clip_noise)
 
+        len_cg = 1  # default value when context_guidance is None
         # handle context_guidance by repeaing each data along batch dimension
+        len_cg = 1
         if context_guidance is not None:
             len_cg = len(context_guidance)
             context_guidance = context_guidance / torch.sum(context_guidance)
             batch_size *= len_cg
-            xs_pred = repeat(xs_pred, "t b ... -> t (b cg) ...", cg=len_cg)
-            context = repeat(context, "t b ... -> t (b cg) ...", cg=len_cg)
-            context_mask = repeat(context_mask, "t b ... -> t (b cg) ...", cg=len_cg)
-            context_k = rearrange(context_k, "cg t b -> t (b cg)", cg=len_cg)
+            xs_pred = repeat(xs_pred, "b t ... -> (b cg) t ...", cg=len_cg)
+            context = repeat(context, "b t ... -> (b cg) t ...", cg=len_cg)
+            context_mask = repeat(context_mask, "b t ... -> (b cg) t ...", cg=len_cg)
+            context_k = rearrange(context_k, "cg b t -> (b cg) t", cg=len_cg)
             if conditions is not None:
-                conditions = repeat(conditions, "t b ... -> t (b cg) ...", cg=len_cg)
+                conditions = repeat(conditions, "b t ... -> (b cg) t ...", cg=len_cg)
 
         if context_k is None and context_mask is not None:
             context_k = torch.full(context_mask.shape[:2], -1, dtype=torch.long)
@@ -634,16 +630,16 @@ class DiffusionForcingBase(BasePytorchAlgo):
         elif not self.use_causal_mask:
             # if not causal, need to pad everything to max_tokens
             padding = self.max_tokens - length
-            context_pad = torch.zeros((padding, batch_size, *x_shape)).to(self.device)
+            context_pad = torch.zeros((batch_size, padding, *x_shape)).to(self.device)
             replace_mask_pad = torch.zeros_like(context_pad, dtype=torch.bool)
-            context_k_pad = torch.zeros((padding, batch_size)).long().to(self.device)
-            context = torch.cat([context, context_pad])
-            replace_mask = torch.cat([replace_mask, replace_mask_pad])
-            context_mask = torch.cat([context_mask, replace_mask_pad])
-            context_k = torch.cat([context_k, context_k_pad])
+            context_k_pad = torch.zeros((batch_size, padding)).long().to(self.device)
+            context = torch.cat([context, context_pad], 1)
+            replace_mask = torch.cat([replace_mask, replace_mask_pad], 1)
+            context_mask = torch.cat([context_mask, replace_mask_pad], 1)
+            context_k = torch.cat([context_k, context_k_pad], 1)
 
         # non context tokens' entries in context_k are self.stabilization_level - 1, in case they get diffused
-        reduced_context_mask = reduce(context_mask, "t b ... -> t b", torch.all)
+        reduced_context_mask = reduce(context_mask, "b t ... -> b t", torch.all)
         context_k = torch.where(
             reduced_context_mask, context_k, self.stabilization_level - 1
         )
@@ -652,14 +648,15 @@ class DiffusionForcingBase(BasePytorchAlgo):
         xs_pred = torch.where(replace_mask, context, xs_pred)
 
         # generate scheduling matrix
+        # fixme: is mask's reduction over b correct or shall we add some value check?
         scheduling_matrix = self._generate_scheduling_matrix(
             h - padding,
             padding,
             is_interpolation=False,
-            mask=reduce(replace_mask, "t ... -> t", torch.all)[: h - padding],
+            mask=reduce(replace_mask, "b t ... -> t", torch.all)[: h - padding],
         )
         scheduling_matrix = scheduling_matrix.to(self.device)
-        scheduling_matrix = repeat(scheduling_matrix, "m t -> m t b", b=batch_size)
+        scheduling_matrix = repeat(scheduling_matrix, "m t -> m b t", b=batch_size)
         # fill context tokens' noise levels as -1 in scheduling matrix
         scheduling_matrix = torch.where(
             reduced_context_mask[None], -1, scheduling_matrix
@@ -667,7 +664,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
 
         # prune scheduling matrix to remove identical adjacent rows
         diff = scheduling_matrix[1:] - scheduling_matrix[:-1]
-        skip = torch.argmax((~reduce(diff == 0, "m t b -> m", torch.all)).float())
+        skip = torch.argmax((~reduce(diff == 0, "m b t -> m", torch.all)).float())
         scheduling_matrix = scheduling_matrix[skip:]
 
         hist = []
@@ -677,48 +674,36 @@ class DiffusionForcingBase(BasePytorchAlgo):
 
             # the code section below is for stabilization in diffusion forcing
             gt_mask = torch.logical_and(reduced_context_mask, context_k < 0)
-            st_mask = torch.logical_and(from_noise_levels == -1, ~gt_mask)
+            # newly generated tokens have noise level -1 but doesn't belong to context
+            gen_mask = torch.logical_and(from_noise_levels == -1, ~gt_mask)
+            # tokens needs stabilization are generated tokens with stabilization level > -1
+            st_mask = torch.logical_and(context_k > -1, gen_mask)
+
             extended_st_mask = rearrange(st_mask, "... -> ..." + " 1" * len(x_shape))
+            extended_gen_mask = rearrange(gen_mask, "... -> ..." + " 1" * len(x_shape))
             from_noise_levels = torch.where(st_mask, context_k, from_noise_levels)
             if self.replacement:
                 to_noise_levels = torch.where(st_mask, context_k, to_noise_levels)
             # update replace mask to include newly diffused tokens
-            replace_mask = torch.logical_or(replace_mask, extended_st_mask)
+            replace_mask = torch.logical_or(replace_mask, extended_gen_mask)
             # stabilization, treat certain tokens as noisy
             scaled_xs_pred = self.diffusion_model.q_sample(
                 xs_pred,
-                from_noise_levels,
+                from_noise_levels,  # notice entries with -1 will not be handled correctly
                 noise=(
                     None
                     if self.replacement == "noisy_scale"
                     else torch.zeros_like(xs_pred)
                 ),
             )
+
             # creates a backup with all clean tokens unscaled
             xs_pred_unstablized = xs_pred.clone()
             xs_pred = torch.where(extended_st_mask, scaled_xs_pred, xs_pred)
 
-            # optionally mask out noise level of context frames if compositional
-            # (noise level will be replaced by unknown token if unknown_noise_level_prob > 0)
-            # if compositional:
-            #     ukn_noise_mask = reduced_replace_mask.clone()
-            # else:
-            #     ukn_noise_mask = torch.zeros_like(gt_mask[m])
-
-            # new compositionality scheme of estimating noise from gaussian
-            # ukn_noise_mask = torch.zeros_like(gt_mask[m])
-            # if compositional:
-            #     optimal_noise_level = self.diffusion_model.estimate_noise_level(context)
-            #     from_noise_levels = torch.where(
-            #         context_mask, optimal_noise_level, from_noise_levels
-            #     )
-            #     to_noise_levels = torch.where(
-            #         context_mask, optimal_noise_level, to_noise_levels
-            #     )
-
             # record value if return history
             if return_hist:
-                hist.append(xs_pred.detach())
+                hist.append(xs_pred.clone())
 
             # add reconstruction_guidance
             if reconstruction_guidance > 0 and context is not None:
@@ -759,32 +744,34 @@ class DiffusionForcingBase(BasePytorchAlgo):
 
             if context_guidance is not None:
                 _xs_pred = xs_pred.clone()
-                xs_pred = rearrange(xs_pred, "t (b cg) ... -> t b cg ...", cg=len_cg)
-                xs_pred = einsum(xs_pred, context_guidance, "t b cg ..., cg -> t b ...")
-                xs_pred = repeat(xs_pred, "t b ... -> t (b cg) ...", cg=len_cg)
+                xs_pred = rearrange(xs_pred, "(b cg) t ... -> b cg t ...", cg=len_cg)
+                xs_pred = einsum(xs_pred, context_guidance, "b cg t ..., cg -> b t ...")
+                xs_pred = repeat(xs_pred, "b t ... -> (b cg) t ...", cg=len_cg)
                 xs_pred = torch.where(context_mask, _xs_pred, xs_pred)
 
             if self.replacement is not None:
                 # revert to noise level -1 for context frames
                 xs_pred = torch.where(replace_mask, xs_pred_unstablized, xs_pred)
 
+        if return_hist:
+            hist.append(xs_pred.clone())
+            hist = torch.stack(hist)
         if padding > 0:
-            xs_pred = xs_pred[:-padding]
-
-        hist = torch.stack(hist)[:, :, ::len_cg] if return_hist else None
-
+            xs_pred = xs_pred[:, :-padding]
+            hist = hist[:, :, :-padding] if return_hist else None
         if context_guidance is not None:
-            xs_pred = xs_pred[:, ::len_cg]
+            xs_pred = xs_pred[::len_cg]
+            hist = hist[:, ::len_cg] if return_hist else None
 
         return xs_pred, hist
 
-    def _generate_noise_levels(
+    def _get_training_noise_levels(
         self, xs: torch.Tensor, masks: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """
         Generate noise levels for training.
         """
-        n_tokens, batch_size, *_ = xs.shape
+        batch_size, n_tokens, *_ = xs.shape
         match self.cfg.noise_level:
             case "random_decay":
                 if not hasattr(self, "noise_level_probs"):
@@ -793,40 +780,40 @@ class DiffusionForcingBase(BasePytorchAlgo):
                     probs = (1 - levels / self.timesteps) ** (1 / gamma) - (
                         1 - (levels + 1) / self.timesteps
                     ) ** (1 / gamma)
-                    self.noise_level_probs = probs / probs.sum()
+                    noise_level_probs = probs / probs.sum()
 
                 noise_levels = torch.multinomial(
-                    self.noise_level_probs, n_tokens * batch_size, replacement=True
-                ).reshape(n_tokens, batch_size)
+                    noise_level_probs, batch_size * n_tokens, replacement=True
+                ).view(batch_size, n_tokens)
 
             case "random_all":  # entirely random noise levels
                 noise_levels = torch.randint(
-                    0, self.timesteps, (n_tokens, batch_size), device=xs.device
+                    0, self.timesteps, (batch_size, n_tokens), device=xs.device
                 )
             case "random_uniform":  # uniform random noise levels for each batch
                 noise_levels = torch.randint(
-                    0, self.timesteps, (1, batch_size), device=xs.device
-                ).repeat(n_tokens, 1)
+                    0, self.timesteps, (batch_size, 1), device=xs.device
+                ).repeat(1, n_tokens)
             case (
                 "random_curr"
             ):  # only random noise levels for the current frame, 0 for all previous frames
                 noise_levels = torch.cat(
                     [
                         torch.zeros(
-                            1, batch_size, dtype=torch.long, device=xs.device
-                        ).repeat(n_tokens - 1, 1),
+                            batch_size, 1, dtype=torch.long, device=xs.device
+                        ).repeat(1, n_tokens - 1),
                         torch.randint(
-                            0, self.timesteps, (1, batch_size), device=xs.device
+                            0, self.timesteps, (batch_size, 1), device=xs.device
                         ),
                     ],
-                    0,
+                    1,
                 )
         if self.cfg.noiseless_context:
-            noise_levels[: self.n_context_tokens] = 0
+            noise_levels[:, : self.n_context_tokens] = 0
 
         if masks is not None:
             # for frames that are not available, treat as full noise
-            masks = reduce(masks.bool(), "t b fs ... -> t b fs", torch.any)
+            masks = reduce(masks.bool(), "b t fs ... -> b t fs", torch.any)
             noise_levels = torch.where(
                 masks.all(-1),
                 noise_levels,
@@ -920,7 +907,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
         return np.clip(scheduling_matrix, 0, self.sampling_timesteps)
 
     def _reweight_loss(self, loss, weight=None):
-        loss = rearrange(loss, "t b (fs c) ... -> t b fs c ...", fs=self.frame_stack)
+        loss = rearrange(loss, "b t (fs c) ... -> b t fs c ...", fs=self.frame_stack)
         if weight is not None:
             expand_dim = len(loss.shape) - len(weight.shape)
             weight = rearrange(
@@ -944,5 +931,5 @@ class DiffusionForcingBase(BasePytorchAlgo):
         return xs * std + mean
 
     def _unstack_and_unnormalize(self, xs):
-        xs = rearrange(xs, "t b (fs c) ... -> (t fs) b c ...", fs=self.frame_stack)
+        xs = rearrange(xs, "b t (fs c) ... -> b (t fs) c ...", fs=self.frame_stack)
         return self._unnormalize_x(xs)

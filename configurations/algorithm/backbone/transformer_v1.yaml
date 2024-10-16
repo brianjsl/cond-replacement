@@ -1,6 +1,6 @@
 name: transformer_v1
-network_size: 32
-attn_dim_head: 32
+network_size: 32 
+attn_dim_head: 32 
 num_layers: 12
 attn_heads: 4
 time_emb_type: rotary

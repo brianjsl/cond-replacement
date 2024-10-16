@@ -35,54 +35,6 @@ class Function1DDataset(ABC, torch.utils.data.Dataset):
     def __getitem__(self, idx) -> Dict:
         raise NotImplementedError
 
-# class LinearNoisy(Function1DDataset):
-#     '''
-#     Linear with Additive Noise.
-#     '''
-    
-#     def __init__(self, cfg:DictConfig, split: Function1DDataset.SPLIT, 
-#                  *args, **kwargs):
-#         super().__init__(cfg, split)
-#         self.a = cfg.a
-#         self.b = cfg.b
-#         self.x_dist = cfg.x_dist
-#         self.sigma = cfg.sigma
-
-#         self.x_cond = None
-#         if split == 'val':
-#             self.x_cond = cfg.val_x_cond
-#         elif split == 'test':
-#             self.x_cond = cfg.test_x_cond
-
-#         assert self.x_dist in ['beta']
-#         match self.x_dist:
-#             case 'beta':
-#                 self.x_dist = torch.distributions.Beta(cfg.x_conc1, cfg.x_conc2)
-#         self.noise_fn = cfg.noise_fn
-#         assert self.noise_fn in ['normal', 'beta']
-#         match self.noise_fn:
-#             case 'normal':
-#                 self.noise_fn = torch.distributions.Normal(0, 1)
-#             case 'beta':
-#                 self.noise_fn = torch.distributions.Beta(cfg.y_conc1,cfg.y_conc2)
-#         self.repeat_dim = 1
-#         if cfg.repeat_dim:
-#             self.repeat_dim = cfg.repeat_dim
-
-            
-        
-#     def __getitem__(self, idx):
-#         if self.x_cond:
-#             x = torch.ones(self.repeat_dim) * self.x_cond
-#             data_points= dict(xs=self.x_cond)
-#         else: 
-#             x = self.x_dist.sample(sample_shape=[self.n_points])
-#             y = self.a * x + self.b + torch.randn_like(x) * self.sigma * self.noise_fn.sample(x.shape)
-#             xy = torch.cat([x,y]).repeat(self.repeat_dim)
-#             output_dict = dict(xs=xy)
-#             data_points =  output_dict
-#         return data_points
-    
 class DoubleConeDataset(Function1DDataset):
     def __init__(self, cfg: DictConfig, split: str = "training"):
         super().__init__(cfg, split)
@@ -158,6 +110,7 @@ class BimodalDataset(DoubleConeDataset):
     def __init__(self, cfg: DictConfig, split: str = "training"):
         super().__init__(cfg, split)
         self.alpha = cfg.alpha
+        # self.offset = cfg.offset
 
     def base_function(self, t: np.ndarray) -> np.ndarray | float:
         up = np.random.random() > 0.5
@@ -208,16 +161,17 @@ if __name__ == "__main__":
         {
             "n_frames": 200,
             "bazier_degree": 15,
-            "purturbation": 0.01,
-            "spike_multiplier": 20,
+            "purturbation": 0.05,
+            "spike_multiplier": 140,
             "alpha": 1,
-            "conditional": False,
+            "conditional": True,
             "external_cond_dim": False,
             "context_length": 100
+            # "offset": 0
         }
     )
-    split = "training"
-    # split = "validation"
+    # split = "training"
+    split = "validation"
     dataset = BimodalDataset(cfg, split=split)
     dataloader = DataLoader(dataset, batch_size=20)
     for d in dataloader:
