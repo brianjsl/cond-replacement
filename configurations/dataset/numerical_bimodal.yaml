@@ -3,7 +3,7 @@ defaults:
 
 conditional: false
 external_cond_dim: 0
-alpha: 4
-
-purturbation: 0.01
-spike_multiplier: 20 
+alpha: 1
+offset: 10
+purturbation: 0.05
+spike_multiplier: 0
