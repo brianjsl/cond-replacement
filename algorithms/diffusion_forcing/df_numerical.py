@@ -27,7 +27,7 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
         xs = output["xs"]
 
         # visualize 64 samples
-        if self.global_step % self.logging.train_vis_freq == 0:
+        if self.global_step % self.logging.train_vis_freq == 0 and self.logger is not None:
             n = self.logging.train_vis_samples
 
             if self.is_conditional:

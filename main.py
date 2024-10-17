@@ -68,7 +68,7 @@ def run_local(cfg: DictConfig):
             id=resume,
         )
     else:
-        logger = None
+        logger = False
 
     # Load ckpt
     resume = cfg.get("resume", None)

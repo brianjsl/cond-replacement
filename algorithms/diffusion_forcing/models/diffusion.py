@@ -123,7 +123,7 @@ class Diffusion(nn.Module):
         )
 
         # calculations for posterior q(x_{t-1} | x_t, x_0)
-
+        # sigma_t in https://arxiv.org/pdf/2010.02502
         posterior_variance = (
             betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
         )
@@ -160,102 +160,102 @@ class Diffusion(nn.Module):
     def add_shape_channels(self, x):
         return rearrange(x, f"... -> ...{' 1' * len(self.x_shape)}")
 
-    def model_predictions(self, x, t, t_mask=None, external_cond=None):
-        model_output = self.model(x, t, t_mask, external_cond)
+    def model_predictions(self, x, k, k_mask=None, external_cond=None):
+        model_output = self.model(x, k, k_mask, external_cond)
 
         if self.objective == "pred_noise":
             pred_noise = torch.clamp(model_output, -self.clip_noise, self.clip_noise)
-            x_start = self.predict_start_from_noise(x, t, pred_noise)
+            x_start = self.predict_start_from_noise(x, k, pred_noise)
 
         elif self.objective == "pred_x0":
             x_start = model_output
-            pred_noise = self.predict_noise_from_start(x, t, x_start)
+            pred_noise = self.predict_noise_from_start(x, k, x_start)
 
         elif self.objective == "pred_v":
             v = model_output
-            x_start = self.predict_start_from_v(x, t, v)
-            pred_noise = self.predict_noise_from_v(x, t, v)
+            x_start = self.predict_start_from_v(x, k, v)
+            pred_noise = self.predict_noise_from_v(x, k, v)
 
         model_pred = ModelPrediction(pred_noise, x_start, model_output)
 
         return model_pred
 
-    def predict_start_from_noise(self, x_t, t, noise):
+    def predict_start_from_noise(self, x_k, k, noise):
         return (
-            extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t
-            - extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * noise
+            extract(self.sqrt_recip_alphas_cumprod, k, x_k.shape) * x_k
+            - extract(self.sqrt_recipm1_alphas_cumprod, k, x_k.shape) * noise
         )
 
-    def predict_noise_from_start(self, x_t, t, x0):
+    def predict_noise_from_start(self, x_k, k, x0):
         # return (
         #     extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t - x0
         # ) / extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape)
-        return (x_t - extract(self.sqrt_alphas_cumprod, t, x_t.shape) * x0) / extract(
-            self.sqrt_one_minus_alphas_cumprod, t, x_t.shape
+        return (x_k - extract(self.sqrt_alphas_cumprod, k, x_k.shape) * x0) / extract(
+            self.sqrt_one_minus_alphas_cumprod, k, x_k.shape
         )
 
-    def predict_v(self, x_start, t, noise):
+    def predict_v(self, x_start, k, noise):
         return (
-            extract(self.sqrt_alphas_cumprod, t, x_start.shape) * noise
-            - extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * x_start
+            extract(self.sqrt_alphas_cumprod, k, x_start.shape) * noise
+            - extract(self.sqrt_one_minus_alphas_cumprod, k, x_start.shape) * x_start
         )
 
-    def predict_start_from_v(self, x_t, t, v):
+    def predict_start_from_v(self, x_k, k, v):
         return (
-            extract(self.sqrt_alphas_cumprod, t, x_t.shape) * x_t
-            - extract(self.sqrt_one_minus_alphas_cumprod, t, x_t.shape) * v
+            extract(self.sqrt_alphas_cumprod, k, x_k.shape) * x_k
+            - extract(self.sqrt_one_minus_alphas_cumprod, k, x_k.shape) * v
         )
 
-    def predict_noise_from_v(self, x_t, t, v):
+    def predict_noise_from_v(self, x_k, k, v):
         return (
-            extract(self.sqrt_alphas_cumprod, t, x_t.shape) * v
-            + extract(self.sqrt_one_minus_alphas_cumprod, t, x_t.shape) * x_t
+            extract(self.sqrt_alphas_cumprod, k, x_k.shape) * v
+            + extract(self.sqrt_one_minus_alphas_cumprod, k, x_k.shape) * x_k
         )
 
-    def q_mean_variance(self, x_start, t):
-        mean = extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
-        variance = extract(1.0 - self.alphas_cumprod, t, x_start.shape)
-        log_variance = extract(self.log_one_minus_alphas_cumprod, t, x_start.shape)
+    def q_mean_variance(self, x_start, k):
+        mean = extract(self.sqrt_alphas_cumprod, k, x_start.shape) * x_start
+        variance = extract(1.0 - self.alphas_cumprod, k, x_start.shape)
+        log_variance = extract(self.log_one_minus_alphas_cumprod, k, x_start.shape)
         return mean, variance, log_variance
 
-    def q_posterior(self, x_start, x_t, t):
+    def q_posterior(self, x_start, x_k, k):
         posterior_mean = (
-            extract(self.posterior_mean_coef1, t, x_t.shape) * x_start
-            + extract(self.posterior_mean_coef2, t, x_t.shape) * x_t
+            extract(self.posterior_mean_coef1, k, x_k.shape) * x_start
+            + extract(self.posterior_mean_coef2, k, x_k.shape) * x_k
         )
-        posterior_variance = extract(self.posterior_variance, t, x_t.shape)
+        posterior_variance = extract(self.posterior_variance, k, x_k.shape)
         posterior_log_variance_clipped = extract(
-            self.posterior_log_variance_clipped, t, x_t.shape
+            self.posterior_log_variance_clipped, k, x_k.shape
         )
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    def q_sample(self, x_start, t, noise=None):
+    def q_sample(self, x_start, k, noise=None):
         if noise is None:
             noise = torch.randn_like(x_start)
             noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
 
         return (
-            extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
-            + extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
+            extract(self.sqrt_alphas_cumprod, k, x_start.shape) * x_start
+            + extract(self.sqrt_one_minus_alphas_cumprod, k, x_start.shape) * noise
         )
 
-    def p_mean_variance(self, x, t, t_mask, external_cond=None):
+    def p_mean_variance(self, x, k, k_mask, external_cond=None):
         model_pred = self.model_predictions(
-            x=x, t=t, t_mask=t_mask, external_cond=external_cond
+            x=x, k=k, k_mask=k_mask, external_cond=external_cond
         )
         x_start = model_pred.pred_x_start
-        return self.q_posterior(x_start=x_start, x_t=x, t=t)
+        return self.q_posterior(x_start=x_start, x_k=x, k=k)
 
     def compute_loss_weights(
         self,
-        noise_levels: torch.Tensor,
+        k: torch.Tensor,
         loss_weighting: Literal["min_snr", "fused_min_snr", "uniform"],
     ) -> torch.Tensor:
         if loss_weighting == "uniform":
-            return torch.ones_like(noise_levels)
+            return torch.ones_like(k)
 
-        snr = self.snr[noise_levels]
-        clipped_snr = self.clipped_snr[noise_levels]
+        snr = self.snr[k]
+        clipped_snr = self.clipped_snr[k]
         normalized_clipped_snr = clipped_snr / self.snr_clip
         normalized_snr = snr / self.snr_clip
 
@@ -274,31 +274,29 @@ class Diffusion(nn.Module):
 
                 def compute_cum_snr(reverse: bool = False):
                     new_normalized_clipped_snr = (
-                        normalized_clipped_snr.flip(0)
+                        normalized_clipped_snr.flip(1)
                         if reverse
                         else normalized_clipped_snr
                     )
                     cum_snr = torch.zeros_like(new_normalized_clipped_snr)
-                    for t in range(0, noise_levels.shape[0]):
+                    for t in range(0, k.shape[1]):
                         if t == 0:
-                            cum_snr[t] = new_normalized_clipped_snr[t]
+                            cum_snr[:, t] = new_normalized_clipped_snr[:, t]
                         else:
-                            cum_snr[t] = (
-                                self.cum_snr_decay * cum_snr[t - 1]
+                            cum_snr[:, t] = (
+                                self.cum_snr_decay * cum_snr[:, t - 1]
                                 + (1 - self.cum_snr_decay)
-                                * new_normalized_clipped_snr[t]
+                                * new_normalized_clipped_snr[:, t]
                             )
-                    cum_snr = F.pad(cum_snr[:-1], (0, 0, 1, 0), value=0.0)
-                    return cum_snr.flip(0) if reverse else cum_snr
+                    cum_snr = F.pad(cum_snr[:, :-1], (1, 0, 0, 0), value=0.0)
+                    return cum_snr.flip(1) if reverse else cum_snr
 
-                cum_snr = (
-                    compute_cum_snr()
-                    if self.use_causal_mask
-                    else (
-                        compute_cum_snr(reverse=True) + compute_cum_snr(reverse=False)
-                    )
-                    / 2  # bi-directional cum_snr when not using causal mask
-                )
+                if self.use_causal_mask:
+                    cum_snr = compute_cum_snr()
+                else:
+                    # bi-directional cum_snr when not using causal mask
+                    cum_snr = compute_cum_snr(reverse=True) + compute_cum_snr()
+                    cum_snr *= 0.5
                 clipped_fused_snr = 1 - (1 - cum_snr * self.cum_snr_decay) * (
                     1 - normalized_clipped_snr
                 )
@@ -323,16 +321,14 @@ class Diffusion(nn.Module):
         self,
         x: torch.Tensor,
         external_cond: Optional[torch.Tensor],
-        noise_levels: torch.Tensor,
+        k: torch.Tensor,
     ):
         noise = torch.randn_like(x)
         noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
 
-        noised_x = self.q_sample(x_start=x, t=noise_levels, noise=noise)
+        noised_x = self.q_sample(x_start=x, k=k, noise=noise)
         model_pred = self.model_predictions(
-            x=noised_x,
-            t=noise_levels,
-            external_cond=external_cond,
+            x=noised_x, k=k, external_cond=external_cond
         )
 
         pred = model_pred.model_out
@@ -343,28 +339,28 @@ class Diffusion(nn.Module):
         elif self.objective == "pred_x0":
             target = x
         elif self.objective == "pred_v":
-            target = self.predict_v(x, noise_levels, noise)
+            target = self.predict_v(x, k, noise)
         else:
             raise ValueError(f"unknown objective {self.objective}")
 
         loss = F.mse_loss(pred, target.detach(), reduction="none")
 
-        if (
+        # image / video joint training - fused snr should not be applied to independent tokens at the end of the sequences
+        is_joint_training = (
             self.loss_weighting == "fused_min_snr"
-            and noise_levels.shape[0] > self.curriculum.curr_n_tokens
-        ):  # joint training - fused snr should not be applied to independent tokens at the end of the sequences
+            and k.shape[1] > self.curriculum.curr_n_tokens
+        )
+        if is_joint_training:
             seq_loss_weight = self.compute_loss_weights(
-                noise_levels[: self.curriculum.curr_n_tokens],
+                k[: self.curriculum.curr_n_tokens],
                 loss_weighting="fused_min_snr",
             )
             indep_tokens_loss_weight = self.compute_loss_weights(
-                noise_levels[self.curriculum.curr_n_tokens :], loss_weighting="min_snr"
+                k[self.curriculum.curr_n_tokens :], loss_weighting="min_snr"
             )
             loss_weight = torch.cat([seq_loss_weight, indep_tokens_loss_weight], dim=0)
         else:
-            loss_weight = self.compute_loss_weights(
-                noise_levels, loss_weighting=self.loss_weighting
-            )
+            loss_weight = self.compute_loss_weights(k, self.loss_weighting)
         loss_weight = self.add_shape_channels(loss_weight)
         loss = loss * loss_weight
 
@@ -372,13 +368,10 @@ class Diffusion(nn.Module):
 
     def ddim_idx_to_noise_level(self, indices: torch.Tensor):
         shape = indices.shape
-        real_steps = (
-            torch.linspace(-1, self.timesteps - 1, steps=self.sampling_timesteps + 1)
-            .to(indices.device)
-            .long()
-        )
-        noise_level = real_steps[indices.flatten()]
-        return noise_level.view(shape)
+        real_steps = torch.linspace(-1, self.timesteps - 1, self.sampling_timesteps + 1)
+        real_steps = real_steps.long().to(indices.device)
+        k = real_steps[indices.flatten()]
+        return k.view(shape)
 
     def ddim_idx_to_pyramid_noise_level(
         self,
@@ -467,8 +460,8 @@ class Diffusion(nn.Module):
 
         model_mean, _, model_log_variance = self.p_mean_variance(
             x=x,
-            t=clipped_curr_noise_level,
-            t_mask=ukn_noise_mask,
+            k=clipped_curr_noise_level,
+            k_mask=ukn_noise_mask,
             external_cond=external_cond,
         )
 
@@ -520,8 +513,8 @@ class Diffusion(nn.Module):
 
                 model_pred = self.model_predictions(
                     x=x,
-                    t=clipped_curr_noise_level,
-                    t_mask=ukn_noise_mask,
+                    k=clipped_curr_noise_level,
+                    k_mask=ukn_noise_mask,
                     external_cond=external_cond,
                 )
 
@@ -546,8 +539,8 @@ class Diffusion(nn.Module):
         else:
             model_pred = self.model_predictions(
                 x=x,
-                t=clipped_curr_noise_level,
-                t_mask=ukn_noise_mask,
+                k=clipped_curr_noise_level,
+                k_mask=ukn_noise_mask,
                 external_cond=external_cond,
             )
             x_start = model_pred.pred_x_start
@@ -569,13 +562,13 @@ class Diffusion(nn.Module):
         return x_pred
 
     def estimate_noise_level(self, x, mu=None):
-        # x ~ (T, B, C, ...)
+        # x ~ ( B, T, C, ...)
         if mu is None:
             mu = torch.zeros_like(x)
         x = x - mu
-        mse = reduce(x**2, "t b ... -> t b", "mean")
+        mse = reduce(x**2, "b t ... -> b t", "mean")
         ll_except_c = -self.log_one_minus_alphas_cumprod[None, None] - mse[
             ..., None
         ] * self.alphas_cumprod[None, None] / (1 - self.alphas_cumprod[None, None])
-        noise_levels = torch.argmax(ll_except_c, -1)
-        return noise_levels
+        k = torch.argmax(ll_except_c, -1)
+        return k

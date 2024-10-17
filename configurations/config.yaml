@@ -1,7 +1,7 @@
 # configuration parsing starts here
 defaults:
   - experiment: exp_numerical # experiment yaml file name in configurations/experiments folder [fixme]
-  - dataset: numerical_bimodal # dataset yaml file name in configurations/dataset folder [fixme]
+  - dataset: numerical_dcone # dataset yaml file name in configurations/dataset folder [fixme]
   - algorithm: fs_numerical # algorithm yaml file name in configurations/algorithm folder [fixme]
   - cluster: null # optional, cluster yaml file name in configurations/cluster folder. Leave null for local compute
 
@@ -10,7 +10,7 @@ debug: false # global debug flag will be passed into configuration of experiment
 wandb:
   entity: brianjsl-research # wandb account name / organization name [fixme]
   project: cond-replacement # wandb project name; if not provided, defaults to root folder name [fixme]
-  mode: online # set wandb logging to online, offline or dryrun
+  mode: disabled # set wandb logging to online, offline or dryrun
 
 resume: null # wandb run id to resume logging and loading checkpoint from
 load: null # wanmdb run id containing checkpoint or a path to a checkpoint file 
