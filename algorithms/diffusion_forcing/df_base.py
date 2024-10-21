@@ -252,34 +252,11 @@ class DiffusionForcingBase(BasePytorchAlgo):
         xs, conditions, masks, *_ = batch
         conditions = self._process_conditions(conditions)
         batch_size, n_tokens, *_ = xs.shape
-
-        if self.cfg.noise_level == "random_curr":  # for teacher forcing
-            raise NotImplementedError
-            # randomly cut the sequence and predict the last frame
-            t = torch.randint(1, n_tokens + 1, (1,)).item()
-            noise_levels = torch.cat(
-                [
-                    self._get_training_noise_levels(xs[:, :t], masks),
-                    torch.zeros(
-                        batch_size, n_tokens - t, dtype=torch.long, device=xs.device
-                    ),
-                ],
-                1,
-            )
-            xs_pred, loss = self.diffusion_model(
-                xs, conditions, noise_levels=noise_levels
-            )
-            # only consider the loss of the chosen frame
-            loss = loss[:, t - 1 : t]
-            masks = masks[:, (t - 1) * self.frame_stack : t * self.frame_stack]
-            xs, xs_pred = xs[:, :t], xs_pred[:, :t]
-
-        else:
-            xs_pred, loss = self.diffusion_model(
-                xs,
-                conditions,
-                k=self._get_training_noise_levels(xs, masks),
-            )
+        xs_pred, loss = self.diffusion_model(
+            xs,
+            conditions,
+            k=self._get_training_noise_levels(xs, masks),
+        )
 
         if self.cfg.noiseless_context:
             masks[:, : self.n_context_tokens * self.frame_stack] = False
@@ -332,10 +309,6 @@ class DiffusionForcingBase(BasePytorchAlgo):
     @torch.no_grad()
     def validation_step(self, batch, batch_idx, namespace="validation") -> STEP_OUTPUT:
         xs, conditions, masks, *_ = batch
-
-        # context_guidance = [0] * (self.n_context_tokens + 1)
-        # context_guidance[0] = -self.cfg.history_guidance_scale
-        # context_guidance[-1] = 1 + self.cfg.history_guidance_scale
 
         context_guidance = [-self.cfg.history_guidance_scale]
         context_guidance += [
@@ -495,6 +468,8 @@ class DiffusionForcingBase(BasePytorchAlgo):
         reconstruction_guidance: float = 0.0,
         context_guidance: Optional[torch.Tensor] = None,
         return_hist: bool = False,
+        rg_monte_carlo: bool = False,
+        monte_carlo_n: int = 20,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         The unified sampling method, with length up to maximum token size.
@@ -693,22 +668,45 @@ class DiffusionForcingBase(BasePytorchAlgo):
 
             # add reconstruction_guidance
             if reconstruction_guidance > 0 and context is not None:
-
                 def composed_guidance_fn(
-                    xk: torch.Tensor, pred_x0: torch.Tensor, alpha_cumprod: torch.Tensor
+                    xk: torch.Tensor, pred_x0: torch.Tensor, alpha_cumprod: torch.Tensor, alpha_cumprod_prev: torch.Tensor
                 ) -> torch.Tensor:
 
-                    loss = (
-                        self.loss_fn(pred_x0, context, reduction="none")
-                        * alpha_cumprod.sqrt()
-                    )
-                    # scale inversely proportional to the number of context frames
-                    loss = torch.sum(
-                        loss
-                        * replace_mask
-                        / replace_mask.sum(dim=0, keepdim=True).clamp(min=1),
-                    )
-                    likelihood = -reconstruction_guidance * 0.5 * loss
+                    if rg_monte_carlo:
+                        assert monte_carlo_n > 0
+                        likelihood = 0
+                        inference_model = self.diffusion_model.clone()
+                        inference_model.ddim_sampling_eta = 0.2
+
+                        for _ in range(monte_carlo_n):
+                            sample_pred = None
+                            
+                            loss = (
+                                self.loss_fn(sample_pred, context, reduction="none")
+                                * alpha_cumprod.sqrt()
+                            )
+                            loss = torch.sum(
+                                loss
+                                * replace_mask
+                                / replace_mask.sum(dim=0, keepdim=True).clamp(min=1),
+                            )
+                            likelihood += -reconstruction_guidance * 0.5 * loss
+                            likelihood /= monte_carlo_n
+
+                            
+                    else:
+                        loss = (
+                            self.loss_fn(pred_x0, context, reduction="none")
+                            * alpha_cumprod.sqrt()
+                        )
+                        # scale inversely proportional to the number of context frames
+                        loss = torch.sum(
+                            loss
+                            * replace_mask
+                            / replace_mask.sum(dim=0, keepdim=True).clamp(min=1),
+                        )
+                        likelihood = -reconstruction_guidance * 0.5 * loss
+
                     if guidance_fn is not None:
                         likelihood += guidance_fn(
                             xk=xk, pred_x0=pred_x0, alpha_cumprod=alpha_cumprod
