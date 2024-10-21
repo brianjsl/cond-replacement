@@ -71,7 +71,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
     @staticmethod
     def _build_static_curriculum(cfg: DictConfig) -> Curriculum:
         return Curriculum.static(
-            n_tokens=cfg.n_frames // cfg.frame_stack,
+            n_tokens= (cfg.n_frames ) // (cfg.frame_stack * (2 if cfg.conditional else 1)),
             n_context_tokens=cfg.context_frames // cfg.frame_stack,
         )
 
@@ -208,29 +208,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
         xs = self._normalize_x(batch["xs"])
         conditions = None
 
-        n_frames = xs.shape[1]
-
-        # if self.padding > 0:
-        #     raise ValueError("n_frames must be a multiple of frame_stack.")
-
-        #     if self.validation_multiplier > 1:
-        #         raise ValueError(
-        #             "Validation multiplier > 1 is not compatible with padding."
-        #         )
-        #     n_tokens = (n_frames + self.padding) // self.frame_stack
-        #     if n_tokens != self.n_tokens:
-        #         raise ValueError("Padding is only supported without curriculum.")
-
-        #     pad = torch.zeros_like(xs[:, : self.padding])
-        #     xs = torch.cat([xs, pad], 1)
-
-        if self.external_cond_dim:
-            if conditions.shape[-1] != self.external_cond_dim:
-                raise ValueError(
-                    f"Expected external condition dim {self.external_cond_dim}, got {conditions.shape[-1]}."
-                )
-            # if self.padding > 0:
-            #     conditions = nn.functional.pad(conditions, (0, 0, 0, self.padding))
+        if self.external_cond_dim != 0:
 
             conditions = rearrange(
                 batch["conds"],
@@ -238,6 +216,11 @@ class DiffusionForcingBase(BasePytorchAlgo):
                 t=self.n_tokens,
                 fs=self.frame_stack,
             )
+
+            if conditions.shape[-1] != self.external_cond_dim:
+                raise ValueError(
+                    f"Expected external condition dim {self.external_cond_dim}, got {conditions.shape[-1]}."
+                )
 
         xs = rearrange(
             xs,
@@ -619,14 +602,17 @@ class DiffusionForcingBase(BasePytorchAlgo):
             context_k = torch.full(context_mask.shape[:2], -1, dtype=torch.long)
 
         # replace mask starts with context mask and will be updated with newly diffused tokens
-        replace_mask = context_mask.clone()
+        if context_mask is not None:
+            replace_mask = context_mask.clone()
 
         # compositional = compositional and self.unknown_noise_level_prob > 0
 
         if context is None:
             # create empty context and zero replacement mask
             context = torch.zeros_like(xs_pred)
+            context_mask = torch.zeros_like(context, dtype=torch.bool)
             replace_mask = torch.zeros_like(xs_pred, dtype=torch.bool)
+            context_k = torch.full((batch_size, h), 0, dtype=torch.long).to(self.device)
         elif not self.use_causal_mask:
             # if not causal, need to pad everything to max_tokens
             padding = self.max_tokens - length

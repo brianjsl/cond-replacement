@@ -1,14 +1,12 @@
 from functools import partial
-from typing import Optional, Literal
+from typing import Optional
 import torch
 from torch import nn
 from omegaconf import DictConfig
 from algorithms.diffusion_forcing.models.curriculum import Curriculum
 from einops import rearrange
 
-from algorithms.diffusion_forcing.models.layers.attention import (
-    TemporalAttentionBlock,
-)
+from algorithms.diffusion_forcing.models.layers.attention import TemporalAttentionBlock
 from .base_backbone import BaseBackbone
 
 
@@ -87,17 +85,10 @@ class Transformer(BaseBackbone):
         noise_levels_mask: Optional[torch.Tensor] = None,
         external_cond: Optional[torch.Tensor] = None,
     ):
-        # x.shape (T, B, C)
-        # noise_levels.shape (T, B)
-        # noise_levels_mask (T, B)
-        # optional external_cond.shape (T, B, C)
-
-        x = rearrange(x, "t b c -> b t c")
-        noise_levels = rearrange(noise_levels, "t b -> b t")
-        if noise_levels_mask is not None:
-            noise_levels_mask = rearrange(noise_levels_mask, "t b -> b t")
-        if external_cond is not None:
-            external_cond = rearrange(external_cond, "t b c -> b t c")
+        # x.shape (B, T, C)
+        # noise_levels.shape (B, T)
+        # noise_levels_mask (B, T)
+        # optional external_cond.shape (B, T, C)
 
         emb = self.noise_level_pos_embedding(noise_levels, noise_levels_mask)
 
@@ -109,7 +100,5 @@ class Transformer(BaseBackbone):
         x = self.init_mlp(x)
         x = self.transformer(x)
         x = self.out_mlp(x)
-
-        x = rearrange(x, "b t c -> t b c")
 
         return x

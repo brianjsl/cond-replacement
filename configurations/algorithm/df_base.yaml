@@ -18,7 +18,7 @@ external_cond_processing: mask_first
 # training hyperparameters
 loss: mse
 weight_decay: 1e-3
-warmup_steps: 5000 #reduced to 100
+warmup_steps: 5000
 optimizer_beta: [0.9, 0.999]
 noise_level: random_all
 noiseless_context: false

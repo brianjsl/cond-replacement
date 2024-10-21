@@ -8,4 +8,4 @@ data_std: 0.5
 bazier_degree: 15 #number of points used-1
 purturbation: 0.05
 spike_multiplier: 20
-conditional: false 
+conditional: false

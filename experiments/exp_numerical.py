@@ -1,4 +1,4 @@
-from datasets.numerical import DoubleConeDataset, DiagonalDataset, HorizontalDataset, ExponentialDataset, BimodalDataset
+from datasets.numerical import DoubleConeDataset, DiagonalDataset, HorizontalDataset, ExponentialDataset, BimodalDataset, BimodalExponentialDataset
 from algorithms.diffusion_forcing import DiffusionForcingNumerical
 from .exp_base import BaseLightningExperiment
 
@@ -37,5 +37,6 @@ class NumericalExperiment(BaseLightningExperiment):
         numerical_dcone=DoubleConeDataset,
         numerical_exp=ExponentialDataset,
         numerical_horizontal=HorizontalDataset,
-        numerical_bimodal=BimodalDataset
+        numerical_bimodal=BimodalDataset,
+        numerical_bimodal_exponential=BimodalExponentialDataset
     )

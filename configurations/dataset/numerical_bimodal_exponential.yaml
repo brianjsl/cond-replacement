@@ -1,0 +1,11 @@
+defaults:
+  - numerical_dcone
+
+n_frames: 200 #number of points (0,1)
+context_length: 0 #length of context (usually half of n_frames)
+conditional: false
+external_cond_dim: 0
+purturbation: 0.05
+spike_multiplier: 0
+alpha: 2.0
+offset_sigma: 1.0

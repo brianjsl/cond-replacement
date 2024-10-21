@@ -27,18 +27,18 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
         xs = output["xs"]
 
         # visualize 64 samples
-        if self.global_step % self.logging.train_vis_freq == 0 and self.logger is not None:
+        if self.global_step % self.logging.train_vis_freq == 0:
             n = self.logging.train_vis_samples
 
-            if self.is_conditional:
-                conditions_vis = rearrange(batch[1], "t b c -> (t c) b 1").contiguous()
-                xs_pred_copy = torch.cat([conditions_vis, xs_pred])
-                xs_copy = torch.cat([conditions_vis, xs])
-                self._visualize(xs_pred_copy[:, :n], name="training_vis/pred_distribution")
-                self._visualize(xs_copy[:, :n], name="training_vis/gt_distribution")
+            if self.is_conditional and self.logger is not None:
+                conditions_vis = rearrange(batch[1], "b t c -> b (t c) 1")
+                xs_pred_copy = torch.cat([conditions_vis, xs_pred], dim = 1)
+                xs_copy = torch.cat([conditions_vis, xs], dim=1)
+                self._visualize(xs_pred_copy[:n], name="training_vis/pred_distribution")
+                self._visualize(xs_copy[:n], name="training_vis/gt_distribution")
             else:
-                self._visualize(xs_pred[:, :n], name="training_vis/pred_distribution")
-                self._visualize(xs[:, :n], name="training_vis/gt_distribution")
+                self._visualize(xs_pred[:n], name="training_vis/pred_distribution")
+                self._visualize(xs[:n], name="training_vis/gt_distribution")
 
         return output
     
@@ -65,12 +65,12 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
     
     @rank_zero_only
     def _visualize(self, xs, name):
-        # xs ~ (t b c)
+        # xs ~ (b t c)
         xs = xs.detach().cpu().numpy()
         subsample = 4
-        xs_start = xs[0, :, 0]
-        xs = xs[::subsample, :, 0]
-        steps, batch_size = xs.shape
+        xs_start = xs[:,0, 0]
+        xs = xs[:,::subsample,0]
+        batch_size, steps = xs.shape
 
         t = np.linspace(0, 1, steps)
         plt.clf()
@@ -80,7 +80,7 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
         for i in range(batch_size):
             color = "b" if xs_start[i] > 0 else "r"
             # color = xs[0, i] 
-            plt.plot(t, xs[:, i], c=color, alpha=0.2)
+            plt.plot(t, xs[i, :], c=color, alpha=0.2)
 
         image_path = f'/tmp/numerical.png'
         plt.savefig(image_path)
@@ -90,30 +90,24 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
     def validation_step(self, batch, batch_idx, namespace="validation") -> STEP_OUTPUT:
         xs, conditions, masks, *_ = batch
 
-        context_guidance = [-self.cfg.history_guidance_scale]
-        context_guidance += [
-            (1 + self.cfg.history_guidance_scale) / self.n_context_tokens
-        ] * self.n_context_tokens
-
         if self.is_conditional:
-            xs_pred, _= self._sample_sequence(
+            xs_pred, _ = self._sample_sequence(
+                xs.shape[0], 
                 xs.shape[1],
-                xs.shape[0],
                 None,
                 None,
-                # None,
+                None,
                 conditions,
                 None,
                 self.cfg.diffusion.reconstruction_guidance
             )
         else:
             xs_pred, _ = self.predict_sequence(
-                xs[: self.n_context_tokens],
-                len(xs),
+                xs[:, : self.n_context_tokens],
+                xs.shape[1],
                 conditions,
                 reconstruction_guidance=self.cfg.diffusion.reconstruction_guidance,
-                # context_guidance=context_guidance,
-                compositional=self.is_compositional,
+                context_guidance=None,
             )
 
         # FIXME: loss
@@ -124,9 +118,9 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
         if self.is_conditional:
             xs_copy = self._unstack_and_unnormalize(xs).detach().cpu()
             xs_pred_copy = self._unstack_and_unnormalize(xs_pred).detach().cpu()
-            conditions_vis = rearrange(conditions, "t b c -> (t c) b 1").contiguous().detach().cpu()
-            xs_copy = torch.cat([conditions_vis, xs_copy])
-            xs_pred_copy = torch.cat([conditions_vis, xs_pred_copy])
+            conditions_vis = rearrange(conditions, "b t c -> b (t c) 1").detach().cpu()
+            xs_copy = torch.cat([conditions_vis, xs_copy], dim=1)
+            xs_pred_copy = torch.cat([conditions_vis, xs_pred_copy], dim=1)
 
             self.validation_step_outputs.append((xs_copy,xs_pred_copy,loss))
         else:
