@@ -14,6 +14,7 @@ from .backbones.dit import DiT3D, DiT1D
 from .backbones.mlp import MlpBackbone
 from .curriculum import Curriculum
 from .utils import make_beta_schedule, extract
+import sys
 
 ModelPrediction = namedtuple(
     "ModelPrediction", ["pred_noise", "pred_x_start", "model_out"]
@@ -161,6 +162,7 @@ class Diffusion(nn.Module):
         return rearrange(x, f"... -> ...{' 1' * len(self.x_shape)}")
 
     def model_predictions(self, x, k, k_mask=None, external_cond=None):
+        model_output = self.model(x, k, k_mask, external_cond)
         model_output = self.model(x, k, k_mask, external_cond)
 
         if self.objective == "pred_noise":
@@ -519,7 +521,8 @@ class Diffusion(nn.Module):
                 )
 
                 guidance_loss = guidance_fn(
-                    xk=x, pred_x0=model_pred.pred_x_start, alpha_cumprod=alpha
+                    xk=x, pred_x0=model_pred.pred_x_start, alpha_cumprod=alpha, k=clipped_curr_noise_level, k_mask=ukn_noise_mask,
+                    external_cond = external_cond
                 )
 
                 grad = -torch.autograd.grad(

@@ -5,5 +5,5 @@ conditional: false
 external_cond_dim: 0
 offset: 10
 purturbation: 0.05
-spike_multiplier: 20
+spike_multiplier: 0
 offset_sigma: 0.3

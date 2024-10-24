@@ -246,20 +246,21 @@ if __name__ == "__main__":
     cfg = DictConfig(
         {
             "n_frames": 200,
-            "bazier_degree": 7,
+            "bazier_degree": 15,
             "purturbation": 0.05,
-            "spike_multiplier": 20,
-            "alpha": 4.0,
+            "spike_multiplier": 0,
+            "alpha": 2.0,
             "conditional": False,
             "external_cond_dim": 0,
             "context_length": 100,
             "offset_sigma": 1.0,
         }
     )
-    split = "training"
-    dataset = ExponentialDataset(cfg, split=split)
+    split = "validation"
+    dataset = BimodalExponentialDataset(cfg, split=split)
     dataloader = DataLoader(dataset, batch_size=100)
     for d in dataloader:
+        print(d['xs'].shape)
         for y in d["xs"][:, :, 0]:
             t = np.linspace(0, 1, len(y))
             col = 'b' if y[0] < 0 else 'r'

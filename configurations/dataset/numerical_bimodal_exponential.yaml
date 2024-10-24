@@ -6,6 +6,6 @@ context_length: 100 #length of context (usually half of n_frames)
 conditional: false
 external_cond_dim: 0
 purturbation: 0.05
-spike_multiplier: 50
+spike_multiplier: 0
 alpha: 2.0
 offset_sigma: 1.0

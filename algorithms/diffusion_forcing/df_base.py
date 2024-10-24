@@ -11,6 +11,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from einops import rearrange, reduce, repeat, einsum
+import copy
+import time
 
 
 from lightning.pytorch.utilities.types import STEP_OUTPUT
@@ -22,7 +24,7 @@ from .models.diffusion import Diffusion
 
 class DiffusionForcingBase(BasePytorchAlgo):
     def __init__(self, cfg: DictConfig):
-        self.x_shape = cfg.x_shape
+        self.x_shape = cfg.x_shape #shape of input, eg. [1] for numerical, [3] for image, [3, 32, 32] for video
         self.frame_stack = cfg.frame_stack
         self.frame_skip = cfg.frame_skip
         self.x_stacked_shape = list(self.x_shape)
@@ -38,7 +40,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
         self.logging = cfg.logging
 
         self.is_compositional = cfg.is_compositional
-        self.unknown_noise_level_prob = cfg.diffusion.unknown_noise_level_prob
+        self.unknown_noise_level_prob = cfg.diffusion.unknown_noise_level_prob #probability of unknown noise level for stochastic timestep embedding
 
         self.uncertainty_scale = cfg.uncertainty_scale
         self.timesteps = cfg.diffusion.timesteps
@@ -356,6 +358,8 @@ class DiffusionForcingBase(BasePytorchAlgo):
         reconstruction_guidance: float = 0.0,
         context_guidance: Optional[Sequence[float]] = None,
         return_hist: bool = False,
+        rg_monte_carlo: bool = False,
+        monte_carlo_n: int = 20,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Predict a sequence using the model, using context tokens at the front.
@@ -451,6 +455,8 @@ class DiffusionForcingBase(BasePytorchAlgo):
                 reconstruction_guidance=reconstruction_guidance,
                 context_guidance=context_guidance,
                 return_hist=return_hist,
+                rg_monte_carlo=rg_monte_carlo,
+                monte_carlo_n=monte_carlo_n
             )
             xs_pred = torch.cat([xs_pred, new_pred[:, -h:]], 1)
             curr_token = xs_pred.shape[1]
@@ -486,6 +492,8 @@ class DiffusionForcingBase(BasePytorchAlgo):
             reconstruction_guidance: the scale of reconstruction guidance for True entries in context_mask
             context_guidance: context guidance from diffusion forcing 2, must be a sequence of floats that sum to 1. nth entry correspond to the weight to the nth context_k
             return_hist: if True, return all steps of the sampling process
+            rg_monte_carlo: if True, use monte carlo sampling for reconstruction guidance
+            monte_carlo_n: number of monte carlo samples for reconstruction guidance
         Returns:
             xs_pred: shape (length, batch_size, *self.x_stacked_shape)
             hist: if True, history of xs_pred (m, length, batch_size, *self.x_stacked_shape) on cpu. None otherwise.
@@ -669,22 +677,24 @@ class DiffusionForcingBase(BasePytorchAlgo):
             # add reconstruction_guidance
             if reconstruction_guidance > 0 and context is not None:
                 def composed_guidance_fn(
-                    xk: torch.Tensor, pred_x0: torch.Tensor, alpha_cumprod: torch.Tensor, alpha_cumprod_prev: torch.Tensor
+                    xk: torch.Tensor, pred_x0: torch.Tensor, alpha_cumprod: torch.Tensor, k: Optional[torch.Tensor], 
+                    k_mask: Optional[torch.Tensor], external_cond: Optional[torch.Tensor] = None
                 ) -> torch.Tensor:
 
                     if rg_monte_carlo:
                         assert monte_carlo_n > 0
+
                         likelihood = 0
-                        inference_model = self.diffusion_model.clone()
-                        inference_model.ddim_sampling_eta = 0.2
+                        inference_model = copy.deepcopy(self.diffusion_model).eval()
+                        inference_model.ddim_sampling_eta = self.cfg.diffusion.rg_eta
 
                         for _ in range(monte_carlo_n):
-                            sample_pred = None
                             
                             loss = (
-                                self.loss_fn(sample_pred, context, reduction="none")
+                                self.loss_fn(sample_pred.pred_x_start, context, reduction="none")
                                 * alpha_cumprod.sqrt()
                             )
+
                             loss = torch.sum(
                                 loss
                                 * replace_mask
@@ -692,8 +702,6 @@ class DiffusionForcingBase(BasePytorchAlgo):
                             )
                             likelihood += -reconstruction_guidance * 0.5 * loss
                             likelihood /= monte_carlo_n
-
-                            
                     else:
                         loss = (
                             self.loss_fn(pred_x0, context, reduction="none")

@@ -108,6 +108,8 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
                 conditions,
                 reconstruction_guidance=self.cfg.diffusion.reconstruction_guidance,
                 context_guidance=None,
+                rg_monte_carlo=self.cfg.diffusion.rg_monte_carlo,
+                monte_carlo_n=self.cfg.diffusion.monte_carlo_n
             )
 
         # FIXME: loss
