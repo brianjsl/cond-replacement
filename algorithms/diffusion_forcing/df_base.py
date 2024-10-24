@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 from einops import rearrange, reduce, repeat, einsum
 import copy
-import time
+import sys
 
 
 from lightning.pytorch.utilities.types import STEP_OUTPUT
@@ -48,6 +48,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
         self.clip_noise = cfg.diffusion.clip_noise
         self.stabilization_level = cfg.diffusion.stabilization_level
         self.replacement = cfg.replacement
+        self.mc_model = None
 
         cfg.diffusion.cum_snr_decay = cfg.diffusion.cum_snr_decay ** (
             self.frame_stack * cfg.frame_skip
@@ -73,7 +74,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
     @staticmethod
     def _build_static_curriculum(cfg: DictConfig) -> Curriculum:
         return Curriculum.static(
-            n_tokens= (cfg.n_frames ) // (cfg.frame_stack * (2 if cfg.conditional else 1)),
+            n_tokens= (cfg.n_frames - (cfg.context_frames if cfg.conditional else 0)) // (cfg.frame_stack),
             n_context_tokens=cfg.context_frames // cfg.frame_stack,
         )
 
@@ -475,7 +476,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
         context_guidance: Optional[torch.Tensor] = None,
         return_hist: bool = False,
         rg_monte_carlo: bool = False,
-        monte_carlo_n: int = 20,
+        monte_carlo_n: int = 0,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         The unified sampling method, with length up to maximum token size.
@@ -501,6 +502,20 @@ class DiffusionForcingBase(BasePytorchAlgo):
         if length is None:
             length = self.max_tokens if context is None else context.shape[1]
 
+        if rg_monte_carlo:
+            if reconstruction_guidance == 0:
+                raise ValueError(
+                    f"RG must be positive but got {reconstruction_guidance}."
+                ) 
+            if monte_carlo_n == 0:
+                raise ValueError(
+                    f"Monte Carlo n must be positive but got {monte_carlo_n}."
+                )
+            if self.cfg.conditional:
+                raise ValueError(
+                    "Monte Carlo RG not supported for conditional model."
+                )
+            
         x_shape = self.x_stacked_shape
 
         if length > self.max_tokens:
@@ -677,21 +692,29 @@ class DiffusionForcingBase(BasePytorchAlgo):
             # add reconstruction_guidance
             if reconstruction_guidance > 0 and context is not None:
                 def composed_guidance_fn(
-                    xk: torch.Tensor, pred_x0: torch.Tensor, alpha_cumprod: torch.Tensor, k: Optional[torch.Tensor], 
-                    k_mask: Optional[torch.Tensor], external_cond: Optional[torch.Tensor] = None
+                    xk: torch.Tensor, pred_x0: torch.Tensor, alpha_cumprod: torch.Tensor
                 ) -> torch.Tensor:
 
                     if rg_monte_carlo:
-                        assert monte_carlo_n > 0
-
                         likelihood = 0
-                        inference_model = copy.deepcopy(self.diffusion_model).eval()
-                        inference_model.ddim_sampling_eta = self.cfg.diffusion.rg_eta
+                        mc_model = copy.deepcopy(self.diffusion_model)
+                        mc_model.ddim_sampling_eta = self.cfg.diffusion.ddim_sampling_eta
 
                         for _ in range(monte_carlo_n):
+                            sample_pred = xk
+                            for alpha in range(m, scheduling_matrix.shape[0]-1):
+                                from_noise_levels = scheduling_matrix[alpha]
+                                to_noise_levels = scheduling_matrix[alpha + 1]
+                                sample_pred = mc_model.sample_step(
+                                    sample_pred,
+                                    conditions,
+                                    from_noise_levels,
+                                    to_noise_levels,
+                                    guidance_fn=guidance_fn,
+                                )
                             
                             loss = (
-                                self.loss_fn(sample_pred.pred_x_start, context, reduction="none")
+                                self.loss_fn(sample_pred, context, reduction="none")
                                 * alpha_cumprod.sqrt()
                             )
 

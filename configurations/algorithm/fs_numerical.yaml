@@ -9,10 +9,11 @@ noise_level: random_uniform
 conditional: ${dataset.conditional}
 
 diffusion:
-  reconstruction_guidance: 30.0
+  reconstruction_guidance: 10.0
   rg_monte_carlo: True
-  monte_carlo_n: 5
-  rg_eta: 0
+  unknown_noise_level_prob: 0.5
+  monte_carlo_n: 10
+  rg_eta: 0.8
 
 logging:
   train_vis_freq: 1000

@@ -521,8 +521,7 @@ class Diffusion(nn.Module):
                 )
 
                 guidance_loss = guidance_fn(
-                    xk=x, pred_x0=model_pred.pred_x_start, alpha_cumprod=alpha, k=clipped_curr_noise_level, k_mask=ukn_noise_mask,
-                    external_cond = external_cond
+                    xk=x, pred_x0=model_pred.pred_x_start, alpha_cumprod=alpha
                 )
 
                 grad = -torch.autograd.grad(
