@@ -7,5 +7,5 @@ data_mean: 0.0
 data_std: 0.5
 bazier_degree: 15 #number of points used-1
 purturbation: 0.05
-spike_multiplier: 20
+spike_multiplier: 0
 conditional: false

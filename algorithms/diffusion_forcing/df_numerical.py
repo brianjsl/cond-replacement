@@ -47,7 +47,7 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
         for out in self.validation_step_outputs:
             (_, xs_pred, loss) = out
 
-            type_name = ''
+            type_name = '_'+self.cfg.type_name if self.cfg.type_name else ''
             if self.is_conditional:
                 type_name += '_conditional'
             elif self.cfg.diffusion.reconstruction_guidance != 0.0:

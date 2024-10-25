@@ -184,11 +184,11 @@ class BimodalExponentialDataset(BimodalDataset):
     def base_function(self, t: np.ndarray) -> np.ndarray | float:
         t_control = np.linspace(0, 1, self.n_frames)
         start = np.random.choice([-1,1])
-        theta = np.random.choice([-0.5,0.5])
+        theta = np.random.choice([-1.5,1.5])
 
         frac = t_control[self.context_length]
 
-        b = theta + self.offset_sigma * np.random.rand()
+        b = theta + np.random.normal(0, self.cfg.offset_sigma)
         k = np.random.random()+2
         cubic_fit = self.cubic_through_two_points_with_slope(0, start, frac, b, frac, theta*k*self.alpha)
         y = cubic_fit(t_control)
@@ -249,11 +249,11 @@ if __name__ == "__main__":
             "bazier_degree": 15,
             "purturbation": 0.05,
             "spike_multiplier": 0,
-            "alpha": 2.0,
+            "alpha": 1.0,
             "conditional": False,
             "external_cond_dim": 0,
             "context_length": 100,
-            "offset_sigma": 1.0,
+            "offset_sigma": 0.5,
         }
     )
     split = "validation"
