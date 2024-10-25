@@ -91,23 +91,20 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
         xs, conditions, masks, *_ = batch
 
         if self.is_conditional:
-            xs_pred, _ = self._sample_sequence(
+            xs_pred = self._sample_sequence(
                 xs.shape[0], 
                 xs.shape[1],
                 None,
                 None,
-                None,
                 conditions,
                 None,
-                self.cfg.diffusion.reconstruction_guidance
             )
         else:
-            xs_pred, _ = self.predict_sequence(
+            xs_pred = self.predict_sequence(
                 xs[:, : self.n_context_tokens],
                 xs.shape[1],
                 conditions,
                 reconstruction_guidance=self.cfg.diffusion.reconstruction_guidance,
-                context_guidance=None,
                 rg_monte_carlo=self.cfg.diffusion.rg_monte_carlo,
                 monte_carlo_n=self.cfg.diffusion.monte_carlo_n
             )

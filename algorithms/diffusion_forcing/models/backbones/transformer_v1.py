@@ -3,7 +3,6 @@ from typing import Optional
 import torch
 from torch import nn
 from omegaconf import DictConfig
-from algorithms.diffusion_forcing.models.curriculum import Curriculum
 from einops import rearrange
 
 from algorithms.diffusion_forcing.models.layers.attention import TemporalAttentionBlock
@@ -16,7 +15,6 @@ class Transformer(BaseBackbone):
         cfg: DictConfig,
         x_shape: torch.Size,
         external_cond_dim: int,
-        curriculum: Curriculum,
         use_causal_mask=True,
         unknown_noise_level_prob=0.0,
     ):
@@ -24,7 +22,6 @@ class Transformer(BaseBackbone):
             cfg,
             x_shape,
             external_cond_dim,
-            curriculum,
             use_causal_mask,
             unknown_noise_level_prob,
         )
@@ -104,24 +101,5 @@ class Transformer(BaseBackbone):
         return x
 
 if __name__ == '__main__':
-    cfg = DictConfig(
-        {
-            'name': 'transformer_v1',
-            'network_size': 32,
-            'attn_dim_head': 32,
-            'num_layers': 12,
-            'attn_heads': 4,
-            'time_emb_type': 'rotary'
-        }
-    )
-    curriculum = Curriculum.static(
-            n_tokens= 20,
-            n_context_tokens= 10, 
-        )
-    transformer = Transformer(cfg, [20], 0, curriculum, False, 0).eval()
-    x = torch.randn(32, 20, 10)
-    out = transformer(x)
-    print(out[0][0][0].item())
-    out = transformer(x)
-    print(out[0][0][0].item())
+    pass
 

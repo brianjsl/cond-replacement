@@ -30,7 +30,7 @@ chunk_size: -1
 scheduling_matrix: autoregressive
 start_exponent: 1.0
 end_exponent: 0.5
-replacement: scale
+replacement: noisy_scale
 
 # compositionality
 is_compositional: False

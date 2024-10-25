@@ -7,11 +7,12 @@ scheduling_matrix: full_sequence
 noise_level: random_uniform
 # warmup_steps: 100 #reduced to 100
 conditional: ${dataset.conditional}
-type_name: monte_carlo_3_eta_1
+type_name: noisy_scale
+replacement: noisy_scale
 
 diffusion:
-  reconstruction_guidance: 15.0
-  rg_monte_carlo: True
+  reconstruction_guidance: 0.0
+  rg_monte_carlo: False
   unknown_noise_level_prob: 0.0
   monte_carlo_n: 3
   rg_eta: 1.0

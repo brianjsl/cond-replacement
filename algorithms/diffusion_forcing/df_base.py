@@ -127,7 +127,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
         """
         Get the number of context tokens for the model.
         """
-        return self.cfg.context_frames / self.frame_stack
+        return self.cfg.context_frames // self.frame_stack
 
     @property
     def n_context_frames(self) -> int:
@@ -199,7 +199,6 @@ class DiffusionForcingBase(BasePytorchAlgo):
     def training_step(self, batch, batch_idx, namespace="training") -> STEP_OUTPUT:
         xs, conditions, masks, *_ = batch
         conditions = self._process_conditions(conditions)
-        batch_size, n_tokens, *_ = xs.shape
         xs_pred, loss = self.diffusion_model(
             xs,
             conditions,
@@ -326,6 +325,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
 
         context_mask = torch.ones_like(context, dtype=torch.bool).to(context.device)
         pad = torch.zeros([batch_size, length - context_len, *self.x_stacked_shape], dtype=torch.bool).to(context.device)
+        context = torch.concat([context, pad], 1)
         context_mask = torch.concat([context_mask, pad], 1)
         # base context noise level, -1 for GT, stabilization_level - 1 for generated tokens
 
@@ -352,7 +352,6 @@ class DiffusionForcingBase(BasePytorchAlgo):
         conditions: Optional[torch.Tensor] = None,
         guidance_fn: Optional[Callable] = None,
         reconstruction_guidance: float = 0.0,
-        context_guidance: Optional[torch.Tensor] = None,
         rg_monte_carlo: bool = False,
         monte_carlo_n: int = 0,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
@@ -417,17 +416,12 @@ class DiffusionForcingBase(BasePytorchAlgo):
         xs_pred = torch.clamp(xs_pred, -self.clip_noise, self.clip_noise)
 
         # replace mask starts with context mask and will be updated with newly diffused tokens
-        if context_mask is not None:
-            replace_mask = context_mask.clone()
 
         if context is None:
             # create empty context and zero replacement mask
             context = torch.zeros_like(xs_pred)
             context_mask = torch.zeros_like(context, dtype=torch.bool)
-            replace_mask = torch.zeros_like(xs_pred, dtype=torch.bool)
 
-        # replace xs_pred's context frames with context
-        xs_pred = torch.where(replace_mask, context, xs_pred)
 
         # generate scheduling matrix
         # fixme: is mask's reduction over b correct or shall we add some value check?
@@ -440,27 +434,20 @@ class DiffusionForcingBase(BasePytorchAlgo):
         scheduling_matrix = repeat(scheduling_matrix, "m t -> m b t", b=batch_size)
 
         for m in range(scheduling_matrix.shape[0] - 1):
+
+            # replace xs_pred's context frames with context
+            xs_pred = torch.where(context_mask, context, xs_pred)
+
             from_noise_levels = scheduling_matrix[m]
             to_noise_levels = scheduling_matrix[m + 1]
 
-            # stabilization, treat certain tokens as noisy
-            scaled_xs_pred = self.diffusion_model.q_sample(
+            pred = self.diffusion_model.q_sample(
                 xs_pred,
-                from_noise_levels,  # notice entries with -1 will not be handled correctly
-                noise=(
-                    None
-                    if self.replacement == "noisy_scale"
-                    else torch.zeros_like(xs_pred)
-                ),
+                from_noise_levels,
+                None
             )
 
-            # creates a backup with all clean tokens unscaled
-            xs_pred_unstablized = xs_pred.clone()
-            xs_pred = torch.where(extended_st_mask, scaled_xs_pred, xs_pred)
-
-            # record value if return history
-            if return_hist:
-                hist.append(xs_pred.clone())
+            xs_pred = torch.where(context_mask, pred, xs_pred)
 
             # add reconstruction_guidance
             if reconstruction_guidance > 0 and context is not None:
@@ -492,8 +479,8 @@ class DiffusionForcingBase(BasePytorchAlgo):
 
                             loss = torch.sum(
                                 loss
-                                * replace_mask
-                                / replace_mask.sum(dim=0, keepdim=True).clamp(min=1),
+                                * context_mask 
+                                / context_mask.sum(dim=0, keepdim=True).clamp(min=1),
                             )
                             likelihood += -reconstruction_guidance * 0.5 * loss
                             likelihood /= monte_carlo_n
@@ -507,8 +494,8 @@ class DiffusionForcingBase(BasePytorchAlgo):
                         # scale inversely proportional to the number of context frames
                         loss = torch.sum(
                             loss
-                            * replace_mask
-                            / replace_mask.sum(dim=0, keepdim=True).clamp(min=1),
+                            * context_mask
+                            / context_mask.sum(dim=0, keepdim=True).clamp(min=1),
                         )
                         likelihood = -reconstruction_guidance * 0.5 * loss
 
@@ -530,28 +517,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
                 guidance_fn=composed_guidance_fn,
             )
 
-            if context_guidance is not None:
-                _xs_pred = xs_pred.clone()
-                xs_pred = rearrange(xs_pred, "(b cg) t ... -> b cg t ...", cg=len_cg)
-                xs_pred = einsum(xs_pred, context_guidance, "b cg t ..., cg -> b t ...")
-                xs_pred = repeat(xs_pred, "b t ... -> (b cg) t ...", cg=len_cg)
-                xs_pred = torch.where(context_mask, _xs_pred, xs_pred)
-
-            if self.replacement is not None:
-                # revert to noise level -1 for context frames
-                xs_pred = torch.where(replace_mask, xs_pred_unstablized, xs_pred)
-
-        if return_hist:
-            hist.append(xs_pred.clone())
-            hist = torch.stack(hist)
-        if padding > 0:
-            xs_pred = xs_pred[:, :-padding]
-            hist = hist[:, :, :-padding] if return_hist else None
-        if context_guidance is not None:
-            xs_pred = xs_pred[::len_cg]
-            hist = hist[:, ::len_cg] if return_hist else None
-
-        return xs_pred, hist
+        return xs_pred
 
     def _get_training_noise_levels(
         self, xs: torch.Tensor, masks: Optional[torch.Tensor] = None

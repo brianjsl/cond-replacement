@@ -138,47 +138,23 @@ class FlexibleRotaryEmbedding(nn.Module):
     def __init__(
         self,
         dim: int,
-        curriculum: Curriculum,
     ):
         super().__init__()
         self.dim = dim
-        self.curriculum = curriculum
         self.model = None
         self.current_seq_len = None
         self._update_model()
 
     def _update_model(self):
-        if self.model is None or self.curriculum.curr_n_tokens != self.current_seq_len:
-            rank_zero_print(
-                cyan(
-                    f"Rescaling RoPE from {self.current_seq_len} to {self.curriculum.curr_n_tokens}"
-                )
-            )
 
-            device = self.model.device if self.model is not None else None
-            rescale_factor = (
-                self.curriculum.curr_n_tokens / self.curriculum.base_n_tokens
-            )
+        device = self.model.device if self.model is not None else None
+        
+        self.model = RotaryEmbedding(
+            self.dim,
+        )
 
-            match self.curriculum.rotary_rescaling:
-                case "NTK":
-                    self.model = RotaryEmbedding(
-                        self.dim,
-                        theta_rescale_factor=rescale_factor,
-                    )
-                case "PI":
-                    self.model = RotaryEmbedding(
-                        self.dim,
-                        interpolate_factor=rescale_factor,
-                    )
-                case _:
-                    raise ValueError(
-                        f"Unknown rescaling method: {self.curriculum.rotary_rescaling}"
-                    )
-
-            if device is not None:
-                self.model.to(device)
-            self.current_seq_len = self.curriculum.curr_n_tokens
+        if device is not None:
+            self.model.to(device)
 
     def rotate_queries_or_keys(self, queries_or_keys: torch.Tensor) -> torch.Tensor:
         self._update_model()

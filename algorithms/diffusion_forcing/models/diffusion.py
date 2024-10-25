@@ -12,7 +12,6 @@ from .backbones.transformer_v1 import Transformer
 from .backbones.transformer_v0 import Transformerv0
 from .backbones.dit import DiT3D, DiT1D
 from .backbones.mlp import MlpBackbone
-from .curriculum import Curriculum
 from .utils import make_beta_schedule, extract
 import sys
 
@@ -28,7 +27,6 @@ class Diffusion(nn.Module):
         backbone_cfg: DictConfig,
         x_shape: torch.Size,
         external_cond_dim: int,
-        curriculum: Curriculum,
     ):
         super().__init__()
         self.cfg = cfg
@@ -50,7 +48,6 @@ class Diffusion(nn.Module):
         self.unknown_noise_level_prob = cfg.unknown_noise_level_prob
         self.stabilization_level = cfg.stabilization_level
 
-        self.curriculum = curriculum
 
         self._build_model()
         self._build_buffer()
@@ -77,7 +74,6 @@ class Diffusion(nn.Module):
             cfg=self.backbone_cfg,
             x_shape=self.x_shape,
             external_cond_dim=self.external_cond_dim,
-            curriculum=self.curriculum,
             use_causal_mask=self.use_causal_mask,
             unknown_noise_level_prob=self.unknown_noise_level_prob,
         )
@@ -347,22 +343,7 @@ class Diffusion(nn.Module):
 
         loss = F.mse_loss(pred, target.detach(), reduction="none")
 
-        # image / video joint training - fused snr should not be applied to independent tokens at the end of the sequences
-        is_joint_training = (
-            self.loss_weighting == "fused_min_snr"
-            and k.shape[1] > self.curriculum.curr_n_tokens
-        )
-        if is_joint_training:
-            seq_loss_weight = self.compute_loss_weights(
-                k[: self.curriculum.curr_n_tokens],
-                loss_weighting="fused_min_snr",
-            )
-            indep_tokens_loss_weight = self.compute_loss_weights(
-                k[self.curriculum.curr_n_tokens :], loss_weighting="min_snr"
-            )
-            loss_weight = torch.cat([seq_loss_weight, indep_tokens_loss_weight], dim=0)
-        else:
-            loss_weight = self.compute_loss_weights(k, self.loss_weighting)
+        loss_weight = self.compute_loss_weights(k, self.loss_weighting)
         loss_weight = self.add_shape_channels(loss_weight)
         loss = loss * loss_weight
 

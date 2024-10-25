@@ -8,9 +8,8 @@ from diffusers.models.embeddings import TimestepEmbedding as ExternalCondEmbeddi
 from omegaconf import DictConfig
 from algorithms.diffusion_forcing.models.layers.embeddings import (
     StochasticTimeEmbedding,
-    FlexibleRotaryEmbedding,
+    RotaryEmbedding
 )
-from algorithms.diffusion_forcing.models.curriculum import Curriculum
 
 
 class BaseBackbone(ABC, nn.Module):
@@ -19,7 +18,6 @@ class BaseBackbone(ABC, nn.Module):
         cfg: DictConfig,
         x_shape: torch.Size,
         external_cond_dim: int,
-        curriculum: Curriculum,
         use_causal_mask=True,
         unknown_noise_level_prob=0.0,
     ):
@@ -28,7 +26,6 @@ class BaseBackbone(ABC, nn.Module):
 
         self.cfg = cfg
         self.external_cond_dim = external_cond_dim
-        self.curriculum = curriculum
         self.use_causal_mask = use_causal_mask
         self.unknown_noise_level_prob = unknown_noise_level_prob
         self.x_shape = x_shape
@@ -47,7 +44,7 @@ class BaseBackbone(ABC, nn.Module):
         )
 
         self.rotary_time_pos_embedding = (
-            FlexibleRotaryEmbedding(dim=self.time_emb_dim, curriculum=curriculum)
+            RotaryEmbedding(dim=self.time_emb_dim)
             if time_emb_type == "rotary"
             else None
         )
