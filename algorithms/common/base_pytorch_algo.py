@@ -95,7 +95,9 @@ class BasePytorchAlgo(pl.LightningModule, ABC):
         https://lightning.ai/docs/pytorch/stable/common/optimization.html
         """
         parameters = self.parameters()
-        return torch.optim.Adam(parameters, lr=self.cfg.lr)
+        optimizer = torch.optim.Adam(parameters, lr=self.cfg.lr)
+
+        return optimizer
 
     def on_load_checkpoint(self, checkpoint: dict) -> None:
         if self.should_validate_ema_weights:

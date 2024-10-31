@@ -4,6 +4,7 @@ import torch
 from torch import nn
 from einops import rearrange, parse_shape
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
 
 
 def exists(val):
@@ -216,7 +217,6 @@ def plot_beta_schedules(
     plt.tight_layout()
     plt.savefig(path)
     plt.close()
-
 
 if __name__ == "__main__":
     plot_beta_schedules(

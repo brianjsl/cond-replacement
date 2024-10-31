@@ -1,32 +1,40 @@
 """
-This repo is forked from [Boyuan Chen](https://boyuan.space/)'s research 
-template [repo](https://github.com/buoyancy99/research-template). 
-By its MIT license, you must keep the above sentence in `README.md` 
-and the `LICENSE` file to credit the author.
-
 Main file for the project. This will create and run new experiments and load checkpoints from wandb. 
 Borrowed part of the code from David Charatan and wandb.
 """
 
+import os
 import sys
 import subprocess
 import time
 from pathlib import Path
 
 import hydra
+from hydra.utils import to_absolute_path
 from omegaconf import DictConfig, OmegaConf
 from omegaconf.omegaconf import open_dict
 
 from utils.print_utils import cyan
-from utils.ckpt_utils import download_latest_checkpoint, is_run_id
+from utils.ckpt_utils import (
+    download_checkpoint,
+    is_run_id,
+    download_autoencoder_kl_checkpoints,
+    parse_load,
+    has_checkpoint,
+    generate_unexisting_run_id,
+    is_existing_run,
+)
 from utils.cluster_utils import submit_slurm_job
-from utils.distributed_utils import is_rank_zero
+from utils.distributed_utils import rank_zero_print, is_rank_zero
+from utils.hydra_utils import unwrap_shortcuts
 
 
 def run_local(cfg: DictConfig):
     # delay some imports in case they are not needed in non-local envs for submission
     from experiments import build_experiment
     from utils.wandb_utils import OfflineWandbLogger, SpaceEfficientWandbLogger
+
+    os.environ["WANDB__SERVICE_WAIT"] = "300"
 
     # Get yaml names
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
@@ -45,62 +53,100 @@ def run_local(cfg: DictConfig):
     if is_rank_zero:
         print(cyan(f"Outputs will be saved to:"), output_dir)
         (output_dir.parents[1] / "latest-run").unlink(missing_ok=True)
-        (output_dir.parents[1] / "latest-run").symlink_to(output_dir, target_is_directory=True)
+        (output_dir.parents[1] / "latest-run").symlink_to(
+            output_dir, target_is_directory=True
+        )
+
+    requeue = cfg.get("requeue", None)
+    requeue_path = (
+        f"{cfg.wandb.entity}/{cfg.wandb.project}/{requeue}" if requeue else None
+    )
+    requeue_has_checkpoint = requeue is not None and has_checkpoint(requeue_path)
+    requeue_is_existing_run = requeue is not None and is_existing_run(requeue_path)
 
     # Set up logging with wandb.
     if cfg.wandb.mode != "disabled":
         # If resuming, merge into the existing run on wandb.
         resume = cfg.get("resume", None)
-        name = f"{cfg.name} ({output_dir.parent.name}/{output_dir.name})" if resume is None else None
+        name = (
+            f"{cfg.name} ({output_dir.parent.name}/{output_dir.name})"
+            if resume is None and not requeue_is_existing_run
+            else None
+        )
 
         if "_on_compute_node" in cfg and cfg.cluster.is_compute_node_offline:
             logger_cls = OfflineWandbLogger
         else:
             logger_cls = SpaceEfficientWandbLogger
 
+        offline = cfg.wandb.mode != "online"
+        wandb_kwargs = {
+            k: v
+            for k, v in OmegaConf.to_container(cfg.wandb, resolve=True).items()
+            if k != "mode"
+        }
         logger = logger_cls(
             name=name,
             save_dir=str(output_dir),
-            offline=cfg.wandb.mode != "online",
-            project=cfg.wandb.project,
-            log_model="all",
+            offline=offline,
+            log_model="all" if not offline else False,
             config=OmegaConf.to_container(cfg),
-            id=resume,
+            id=resume or requeue,
+            **wandb_kwargs,
         )
     else:
-        logger = False
+        logger = None
 
     # Load ckpt
     resume = cfg.get("resume", None)
+    if requeue_has_checkpoint:
+        if is_rank_zero:
+            print(cyan(f"Resuming from requeued run: {requeue}"))
+            download_checkpoint(
+                f"{cfg.wandb.entity}/{cfg.wandb.project}/{requeue}",
+                Path("outputs/downloaded"),
+                "latest",
+            )
+        resume = requeue
+
     load = cfg.get("load", None)
     checkpoint_path = None
     load_id = None
-    if load and not is_run_id(load):
-        checkpoint_path = load
     if resume:
         load_id = resume
-    elif load and is_run_id(load):
-        load_id = load
-    else:
-        load_id = None
+    elif load:
+        load_id = parse_load(load)[0]
+        if load_id is None:
+            checkpoint_path = load
 
     if load_id:
         run_path = f"{cfg.wandb.entity}/{cfg.wandb.project}/{load_id}"
         checkpoint_path = Path("outputs/downloaded") / run_path / "model.ckpt"
 
-    if checkpoint_path and is_rank_zero:
-        print(f"Will load checkpoint from {checkpoint_path}")
+    if checkpoint_path:
+        rank_zero_print(f"Will load checkpoint from {checkpoint_path}")
 
     # launch experiment
     experiment = build_experiment(cfg, logger, checkpoint_path)
-
-    # for those who are searching, this is where we call tasks like 'training, validation, main'
     for task in cfg.experiment.tasks:
         experiment.exec_task(task)
 
 
 def run_slurm(cfg: DictConfig):
-    python_args = " ".join(sys.argv[1:]) + " +_on_compute_node=True"
+    python_args = (
+        " ".join(
+            [
+                (
+                    f"'+requeue={generate_unexisting_run_id(cfg.wandb.entity, cfg.wandb.project)}'"
+                    if (arg.startswith("+requeue") and not is_run_id(arg.split("=")[1]))
+                    else f"'{arg}'"
+                )
+                for arg in sys.argv[1:]
+            ]
+        )
+        + " +_on_compute_node=True"
+    )
+
     project_root = Path.cwd()
     while not (project_root / ".git").exists():
         project_root = project_root.parent
@@ -113,8 +159,14 @@ def run_slurm(cfg: DictConfig):
         project_root,
     )
 
-    if "cluster" in cfg and cfg.cluster.is_compute_node_offline and cfg.wandb.mode == "online":
-        print("Job submitted to a compute node without internet. This requires manual syncing on login node.")
+    if (
+        "cluster" in cfg
+        and cfg.cluster.is_compute_node_offline
+        and cfg.wandb.mode == "online"
+    ):
+        print(
+            "Job submitted to a compute node without internet. This requires manual syncing on login node."
+        )
         osh_command_dir = project_root / ".wandb_osh_command_dir"
 
         osh_proc = None
@@ -133,13 +185,17 @@ def run_slurm(cfg: DictConfig):
     )
     msg = f"tail -f {slurm_log_dir}/* \n"
     try:
-        while not list(slurm_log_dir.glob("*.out")) and not list(slurm_log_dir.glob("*.err")):
+        while not list(slurm_log_dir.glob("*.out")) and not list(
+            slurm_log_dir.glob("*.err")
+        ):
             time.sleep(1)
         print(cyan("To trace the outputs and errors, run the following command:"), msg)
     except KeyboardInterrupt:
         print("Keyboard interrupt detected. Exiting...")
         print(
-            cyan("To trace the outputs and errors, manually wait for the job to start and run the following command:"),
+            cyan(
+                "To trace the outputs and errors, manually wait for the job to start and run the following command:"
+            ),
             msg,
         )
 
@@ -156,7 +212,9 @@ def run(cfg: DictConfig):
                 cfg.wandb.mode = "offline"
 
     if "name" not in cfg:
-        raise ValueError("must specify a name for the run with command line argument '+name=[name]'")
+        raise ValueError(
+            "must specify a name for the run with command line argument '+name=[name]'"
+        )
 
     if not cfg.wandb.get("entity", None):
         raise ValueError(
@@ -171,6 +229,7 @@ def run(cfg: DictConfig):
     # If resuming or loading a wandb ckpt and not on a compute node, download the checkpoint.
     resume = cfg.get("resume", None)
     load = cfg.get("load", None)
+    load_id = None
 
     if resume and load:
         raise ValueError(
@@ -178,23 +237,34 @@ def run(cfg: DictConfig):
             "and `load` should not be specified."
         )
 
+    option = None
     if resume:
         load_id = resume
-    elif load and is_run_id(load):
-        load_id = load
-    else:
-        load_id = None
+        option = "latest"
+    elif load:
+        load_id, option = parse_load(load)
+        option = "best" if option is None else option
 
-    if load_id and "_on_compute_node" not in cfg:
-        run_path = f"{cfg.wandb.entity}/{cfg.wandb.project}/{load_id}"
-        download_latest_checkpoint(run_path, Path("outputs/downloaded"))
+    if not "skip_download" in cfg:
+        if load_id and "_on_compute_node" not in cfg:
+            run_path = f"{cfg.wandb.entity}/{cfg.wandb.project}/{load_id}"
+            download_checkpoint(run_path, Path("outputs/downloaded"), option=option)
+        if "_on_compute_node" not in cfg and is_rank_zero:
+            download_autoencoder_kl_checkpoints(cfg)
 
     if "cluster" in cfg and not "_on_compute_node" in cfg:
-        print(cyan("Slurm detected, submitting to compute node instead of running locally..."))
+        print(
+            cyan(
+                "Slurm detected, submitting to compute node instead of running locally..."
+            )
+        )
         run_slurm(cfg)
     else:
         run_local(cfg)
 
 
 if __name__ == "__main__":
-    run()
+    sys.argv = unwrap_shortcuts(
+        sys.argv, config_path="configurations", config_name="config"
+    )
+    run()  # pylint: disable=no-value-for-parameter

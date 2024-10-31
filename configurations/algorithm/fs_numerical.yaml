@@ -5,17 +5,16 @@ defaults:
 chunk_size: -1
 scheduling_matrix: full_sequence
 noise_level: random_uniform
-# warmup_steps: 100 #reduced to 100
+# warmup_steps: 1000 #reduced to 100
 conditional: ${dataset.conditional}
-type_name: noisy_scale
-replacement: noisy_scale
+type_name: monte_carlo_500_eta_0.4
 
 diffusion:
-  reconstruction_guidance: 0.0
-  rg_monte_carlo: False
+  reconstruction_guidance: 10.0
+  rg_monte_carlo: True
   unknown_noise_level_prob: 0.0
-  monte_carlo_n: 3
-  rg_eta: 1.0
+  monte_carlo_n: 500
+  rg_eta: 0.4
 
 logging:
   train_vis_freq: 1000

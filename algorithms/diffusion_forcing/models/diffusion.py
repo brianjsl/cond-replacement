@@ -14,6 +14,7 @@ from .backbones.dit import DiT3D, DiT1D
 from .backbones.mlp import MlpBackbone
 from .utils import make_beta_schedule, extract
 import sys
+from tqdm import tqdm
 
 ModelPrediction = namedtuple(
     "ModelPrediction", ["pred_noise", "pred_x_start", "model_out"]
@@ -388,6 +389,7 @@ class Diffusion(nn.Module):
         next_noise_level: torch.Tensor,
         ukn_noise_mask: Optional[torch.Tensor] = None,
         guidance_fn: Optional[Callable] = None,
+        rg_fns: Optional[list] = None,
     ):
         # real_steps = torch.linspace(
         #     -1, self.timesteps - 1, steps=self.sampling_timesteps + 1, device=x.device
@@ -408,6 +410,7 @@ class Diffusion(nn.Module):
                 next_noise_level=next_noise_level,
                 ukn_noise_mask=ukn_noise_mask,
                 guidance_fn=guidance_fn,
+                rg_fns = rg_fns
             )
 
         # FIXME: temporary code for checking ddpm sampling
@@ -426,8 +429,9 @@ class Diffusion(nn.Module):
             curr_noise_level=curr_noise_level,
             ukn_noise_mask=ukn_noise_mask,
             guidance_fn=guidance_fn,
+            rg_fns = rg_fns
         )
-
+        
     def ddpm_sample_step(
         self,
         x: torch.Tensor,
@@ -435,9 +439,9 @@ class Diffusion(nn.Module):
         curr_noise_level: torch.Tensor,
         ukn_noise_mask: Optional[torch.Tensor] = None,
         guidance_fn: Optional[Callable] = None,
+        guidance_scale: Optional[float] = 1.0,
+        rg_fns: Optional[list] = None,
     ):
-        if guidance_fn is not None:
-            raise NotImplementedError("guidance_fn is not yet implmented for ddpm.")
 
         clipped_curr_noise_level = torch.clamp(curr_noise_level, min=0)
 
@@ -447,6 +451,19 @@ class Diffusion(nn.Module):
             k_mask=ukn_noise_mask,
             external_cond=external_cond,
         )
+
+        if guidance_fn is not None:
+            with torch.enable_grad():
+                guidance_loss = guidance_fn(
+                    xk=x
+                )
+                grad = -torch.autograd.grad(
+                    guidance_loss,
+                    x,
+                )[0]
+            model_mean += guidance_scale * ()
+            
+
 
         noise = torch.where(
             self.add_shape_channels(clipped_curr_noise_level > 0),
@@ -467,6 +484,7 @@ class Diffusion(nn.Module):
         next_noise_level: torch.Tensor,
         ukn_noise_mask: Optional[torch.Tensor] = None,
         guidance_fn: Optional[Callable] = None,
+        rg_fns: Optional[list] = None,
     ):
 
         clipped_curr_noise_level = torch.clamp(curr_noise_level, min=0)
@@ -490,7 +508,7 @@ class Diffusion(nn.Module):
         c = self.add_shape_channels(c)
         sigma = self.add_shape_channels(sigma)
 
-        if guidance_fn is not None:
+        if guidance_fn is not None or rg_fns is not None:
             with torch.enable_grad():
                 x = x.detach().requires_grad_()
 
@@ -501,14 +519,34 @@ class Diffusion(nn.Module):
                     external_cond=external_cond,
                 )
 
-                guidance_loss = guidance_fn(
-                    xk=x, pred_x0=model_pred.pred_x_start, alpha_cumprod=alpha
-                )
+                if guidance_fn:
+                    guidance_loss = guidance_fn(
+                        xk=x, pred_x0=model_pred.pred_x_start, alpha_cumprod=alpha
+                    )
 
-                grad = -torch.autograd.grad(
-                    guidance_loss,
-                    x,
-                )[0]
+                    grad = -torch.autograd.grad(
+                        guidance_loss,
+                        x,
+                    )[0].detach()
+
+                for mixture in tqdm(rg_fns):
+                    mixture_loss = mixture(
+                        xk = x, pred_x0 = model_pred.pred_x_start, alpha_cumprod = alpha
+                    )
+                    if guidance_fn:
+                        grad += -torch.autograd.grad(
+                            mixture_loss,
+                            x,
+                        )[0].detach()
+                    else:
+                        grad = -torch.autograd.grad(
+                            mixture_loss,
+                            x,
+                        )[0].detach()
+
+                    grad = torch.nan_to_num(grad, nan=0.0)
+
+                    torch.cuda.empty_cache()
 
                 pred_noise = model_pred.pred_noise + (1 - alpha).sqrt() * grad
                 x_start = torch.where(

@@ -41,6 +41,7 @@ history_guidance_scale: 0
 
 diffusion:
   timesteps: 1000
+  # timesteps: 50
   beta_schedule: cosine
   schedule_fn_kwargs:
     shift: 1.0 # ideally 1 / frame_stack

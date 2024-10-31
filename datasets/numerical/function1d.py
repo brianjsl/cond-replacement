@@ -180,11 +180,12 @@ class BimodalExponentialDataset(BimodalDataset):
     def __init__(self, cfg: DictConfig, split: str = "training"):
         super().__init__(cfg, split)
         self.alpha = cfg.alpha
+        self.theta = cfg.theta
 
     def base_function(self, t: np.ndarray) -> np.ndarray | float:
         t_control = np.linspace(0, 1, self.n_frames)
         start = np.random.choice([-1,1])
-        theta = np.random.choice([-1.5,1.5])
+        theta = np.random.choice([-self.theta,self.theta])
 
         frac = t_control[self.context_length]
 
@@ -208,6 +209,39 @@ class BimodalExponentialDataset(BimodalDataset):
     #     y = torch.from_numpy(y).float()[..., None]
     #     output_dict = dict(xs=y)
     #     return output_dict
+
+class StochasticBimodalExponentialDataset(BimodalDataset):
+    def __init__(self, cfg: DictConfig, split: str = "training"):
+        super().__init__(cfg, split)
+        self.alpha_mean = cfg.alpha_mean
+        self.alpha_std = cfg.alpha_std
+        self.half_scale = cfg.half_scale
+        self.theta = cfg.theta
+
+    def base_function(self, t: np.ndarray) -> np.ndarray | float:
+        t_control = np.linspace(0, 1, self.n_frames)
+
+        alpha = np.random.normal(self.alpha_mean, self.alpha_std)
+
+        theta = np.random.choice([-self.theta,self.theta])
+        start = np.random.choice([-np.exp(self.half_scale * np.abs(alpha)),np.exp(self.half_scale * np.abs(alpha))])
+
+        frac = t_control[self.context_length]
+
+        b = theta + np.random.normal(0, self.cfg.offset_sigma)
+        k = np.random.random()+2
+        cubic_fit = self.cubic_through_two_points_with_slope(0, start, frac, b, frac, theta*k*alpha)
+        y = cubic_fit(t_control)
+
+        alpha = np.random.normal(self.alpha_mean, self.alpha_std)
+        y[self.context_length:] = theta*np.exp(k * alpha * 
+        (t_control[self.context_length:] - frac))- theta +y[self.context_length-1]
+        t_idx = t * self.n_frames
+        t_idx = t_idx.astype(int)
+        for i in range(len(t_idx)):
+            if t_idx[i] >= self.n_frames:
+                t_idx[i] = self.n_frames - 1
+        return y[t_idx]
     
 class DiagonalDataset(DoubleConeDataset):
 
@@ -249,15 +283,19 @@ if __name__ == "__main__":
             "bazier_degree": 15,
             "purturbation": 0.05,
             "spike_multiplier": 0,
-            "alpha": 1.0,
+            # "alpha": 1.0,
             "conditional": False,
             "external_cond_dim": 0,
             "context_length": 100,
-            "offset_sigma": 0.5,
+            "offset_sigma": 0.3,
+            "theta": 1.5,
+            "alpha_mean": 0.5,
+            "alpha_std": 0.1,
+            "half_scale": 2
         }
     )
-    split = "validation"
-    dataset = BimodalExponentialDataset(cfg, split=split)
+    split = "training"
+    dataset = StochasticBimodalExponentialDataset(cfg, split=split)
     dataloader = DataLoader(dataset, batch_size=100)
     for d in dataloader:
         print(d['xs'].shape)

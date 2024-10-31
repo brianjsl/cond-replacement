@@ -1,1 +1,1 @@
-from .function1d import DoubleConeDataset, DiagonalDataset, HorizontalDataset, ExponentialDataset, BimodalDataset, BimodalExponentialDataset
+from .function1d import DoubleConeDataset, DiagonalDataset, HorizontalDataset, ExponentialDataset, BimodalDataset, BimodalExponentialDataset, StochasticBimodalExponentialDataset

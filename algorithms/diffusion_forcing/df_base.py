@@ -11,6 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from einops import rearrange, reduce, repeat, einsum
+from tqdm import tqdm
 import copy
 import sys
 
@@ -245,6 +246,10 @@ class DiffusionForcingBase(BasePytorchAlgo):
             )
             for pg in optimizer.param_groups:
                 pg["lr"] = lr_scale * self.cfg.lr
+        
+        
+        for pg in optimizer.param_groups:
+            pg["lr"] = self.cfg.lr
 
         # update params
         optimizer.step(closure=optimizer_closure)
@@ -255,6 +260,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
 
     @torch.no_grad()
     def validation_step(self, batch, batch_idx, namespace="validation") -> STEP_OUTPUT:
+        self.diffusion_model.clip_noise = 1.0
         xs, conditions, masks, *_ = batch
 
         xs_pred, _ = self.predict_sequence(
@@ -314,7 +320,6 @@ class DiffusionForcingBase(BasePytorchAlgo):
         if length is None:
             length = self.n_tokens 
 
-        xs_pred = context
         batch_size, context_len, _ = context.shape
 
         if conditions is not None:
@@ -322,6 +327,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
                 raise ValueError(
                     f"conditions length is expected to be at least the length {length} but got {conditions.shape[1]}."
                 )
+        xs_pred = context
 
         context_mask = torch.ones_like(context, dtype=torch.bool).to(context.device)
         pad = torch.zeros([batch_size, length - context_len, *self.x_stacked_shape], dtype=torch.bool).to(context.device)
@@ -340,7 +346,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
             rg_monte_carlo=rg_monte_carlo,
             monte_carlo_n=monte_carlo_n
         )
-        xs_pred = torch.cat([xs_pred, new_pred[:, -context_len:]], 1)
+        xs_pred = torch.where(context_mask, context, new_pred)
         return xs_pred
 
     def _sample_sequence(
@@ -434,6 +440,7 @@ class DiffusionForcingBase(BasePytorchAlgo):
         scheduling_matrix = repeat(scheduling_matrix, "m t -> m b t", b=batch_size)
 
         for m in range(scheduling_matrix.shape[0] - 1):
+            print(f'Processing timestep {m}')
 
             # replace xs_pred's context frames with context
             xs_pred = torch.where(context_mask, context, xs_pred)
@@ -449,17 +456,14 @@ class DiffusionForcingBase(BasePytorchAlgo):
 
             xs_pred = torch.where(context_mask, pred, xs_pred)
 
-            # add reconstruction_guidance
             if reconstruction_guidance > 0 and context is not None:
-                def composed_guidance_fn(
-                    xk: torch.Tensor, pred_x0: torch.Tensor, alpha_cumprod: torch.Tensor
-                ) -> torch.Tensor:
-
-                    if rg_monte_carlo:
-                        likelihood = 0
-                        self.diffusion_model.ddim_sampling_eta = self.cfg.diffusion.rg_eta
-
-                        for _ in range(monte_carlo_n):
+                if rg_monte_carlo:
+                    self.diffusion_model.ddim_sampling_eta = self.cfg.diffusion.rg_eta
+                    rg_mixtures = []
+                    for _ in tqdm(range(monte_carlo_n)):
+                        def mixture(xk: torch.Tensor,
+                                    pred_x0: torch.Tensor,
+                                    alpha_cumprod: torch.Tensor) -> torch.Tensor:
                             sample_pred = xk
                             for alpha in range(m, scheduling_matrix.shape[0]-1):
                                 from_noise_levels = scheduling_matrix[alpha]
@@ -469,24 +473,24 @@ class DiffusionForcingBase(BasePytorchAlgo):
                                     conditions,
                                     from_noise_levels,
                                     to_noise_levels,
-                                    guidance_fn=guidance_fn,
+                                    guidance_fn=None,
+                                    ) 
+                            loss = (self.loss_fn(sample_pred, context, reduction="none")
+                                * alpha_cumprod.sqrt()  
                                 )
-
-                            loss = (
-                                self.loss_fn(sample_pred, context, reduction="none")
-                                * alpha_cumprod.sqrt()
-                            )
-
-                            loss = torch.sum(
+                            r_loss = torch.sum(
                                 loss
-                                * context_mask 
-                                / context_mask.sum(dim=0, keepdim=True).clamp(min=1),
+                                * context_mask
+                                / context_mask.sum(dim=1, keepdim=True).clamp(min=1),
                             )
-                            likelihood += -reconstruction_guidance * 0.5 * loss
-                            likelihood /= monte_carlo_n
-
-                        self.diffusion_model.ddim_sampling_eta = self.cfg.diffusion.ddim_sampling_eta
-                    else:
+                            likelihood = -reconstruction_guidance * 0.5 * r_loss / monte_carlo_n
+                            return likelihood
+                        rg_mixtures.append(mixture)
+                    self.diffusion_model.ddim_sampling_eta = self.cfg.diffusion.ddim_sampling_eta
+                else:
+                    def mixture(xk: torch.Tensor,
+                                pred_x0: torch.Tensor,
+                                alpha_cumprod: torch.Tensor) -> torch.Tensor:
                         loss = (
                             self.loss_fn(pred_x0, context, reduction="none")
                             * alpha_cumprod.sqrt()
@@ -495,17 +499,11 @@ class DiffusionForcingBase(BasePytorchAlgo):
                         loss = torch.sum(
                             loss
                             * context_mask
-                            / context_mask.sum(dim=0, keepdim=True).clamp(min=1),
+                            / context_mask.sum(dim=1, keepdim=True).clamp(min=1),
                         )
                         likelihood = -reconstruction_guidance * 0.5 * loss
-
-                    if guidance_fn is not None:
-                        likelihood += guidance_fn(
-                            xk=xk, pred_x0=pred_x0, alpha_cumprod=alpha_cumprod
-                        )
-                    return likelihood
-            else:
-                composed_guidance_fn = guidance_fn
+                        return likelihood
+                    rg_mixtures = [mixture]
 
             # update xs_pred by DDIM or DDPM sampling
             # input frames within the sliding window
@@ -514,8 +512,10 @@ class DiffusionForcingBase(BasePytorchAlgo):
                 conditions,
                 from_noise_levels,
                 to_noise_levels,
-                guidance_fn=composed_guidance_fn,
+                guidance_fn=guidance_fn,
+                rg_fns = rg_mixtures
             )
+        
 
         return xs_pred
 

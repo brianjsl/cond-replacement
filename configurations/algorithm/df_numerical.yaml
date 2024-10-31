@@ -15,6 +15,7 @@ diffusion:
   use_causal_mask: False
   # sampling
   sampling_timesteps: 50
+  clip_noise: 1.0
 
 # logging and validation
 logging:

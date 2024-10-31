@@ -88,6 +88,7 @@ class DiffusionForcingNumerical(DiffusionForcingBase):
 
     @torch.no_grad()
     def validation_step(self, batch, batch_idx, namespace="validation") -> STEP_OUTPUT:
+        self.diffusion_model.clip_noise = self.cfg.diffusion.clip_noise
         xs, conditions, masks, *_ = batch
 
         if self.is_conditional:

@@ -2,7 +2,6 @@ import math
 from typing import Optional
 import torch
 from omegaconf import DictConfig
-from algorithms.diffusion_forcing.models.curriculum import Curriculum
 from einops import rearrange
 from .base_backbone import BaseBackbone
 from algorithms.common.models.mlp import SimpleMlp
@@ -22,7 +21,6 @@ class MlpBackbone(BaseBackbone):
         cfg: DictConfig,
         x_shape: torch.Size,
         external_cond_dim: int,
-        curriculum: Curriculum,
         use_causal_mask=True,
         unknown_noise_level_prob=0.0,
     ):
@@ -30,7 +28,6 @@ class MlpBackbone(BaseBackbone):
             cfg,
             x_shape,
             external_cond_dim,
-            curriculum,
             use_causal_mask,
             unknown_noise_level_prob,
         )
